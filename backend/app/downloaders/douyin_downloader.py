@@ -27,13 +27,6 @@ class DouyinDownloader(Downloader, ABC):
         ydl_opts = {
             'format': 'bestaudio[ext=m4a]/bestaudio/best',
             'outtmpl': output_path,
-            'postprocessors': [
-                {
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '64',
-                }
-            ],
             'noplaylist': True,
             'quiet': False,
         }
@@ -44,7 +37,7 @@ class DouyinDownloader(Downloader, ABC):
             title = info.get("title")
             duration = info.get("duration", 0)
             cover_url = info.get("thumbnail")
-            audio_path = os.path.join(output_dir, f"{video_id}.mp3")
+            audio_path = os.path.join(output_dir, f"{video_id}.m4a")
 
         return AudioDownloadResult(
             file_path=audio_path,
