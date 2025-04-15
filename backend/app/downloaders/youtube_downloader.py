@@ -30,7 +30,7 @@ class YoutubeDownloader(Downloader, ABC):
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
         ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
+            'format': 'best[height<=480][ext=mp4]/best[height<=480]/best',
             'outtmpl': output_path,
             'noplaylist': True,
             'quiet': False,

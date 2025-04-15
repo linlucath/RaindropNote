@@ -69,7 +69,7 @@ class BilibiliDownloader(Downloader, ABC):
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
         ydl_opts = {
-            'format': 'bv*[ext=mp4]/bestvideo+bestaudio/best',
+            'format': 'best[height<=480][ext=mp4]/best[height<=480]/best',
             'outtmpl': output_path,
             'noplaylist': True,
             'quiet': False,
