@@ -41,8 +41,8 @@ class VideoRequest(BaseModel):
     quality: DownloadQuality
     screenshot: Optional[bool] = False
     link: Optional[bool] = False
-    model_name: str
-    provider_id: str
+    model_name: Optional[str] = None
+    provider_id: Optional[str] = None
     task_id: Optional[str] = None
     format: Optional[list] = []
     style: str = None
@@ -50,6 +50,7 @@ class VideoRequest(BaseModel):
     video_understanding: Optional[bool] = False
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
+    mode: Optional[str] = "note"
 
     @field_validator("video_url")
     def validate_supported_url(cls, v):
@@ -68,6 +69,57 @@ NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
 UPLOAD_DIR = "uploads"
 
 
+def _is_note_result_file(path: Path) -> bool:
+    name = path.name
+    return (
+        path.suffix == ".json"
+        and not name.endswith(".status.json")
+        and not path.stem.endswith("_transcript")
+        and not path.stem.endswith("_audio")
+    )
+
+
+def list_saved_tasks():
+    output_dir = Path(NOTE_OUTPUT_DIR)
+    if not output_dir.exists():
+        return []
+
+    tasks = []
+    for result_path in output_dir.glob("*.json"):
+        if not _is_note_result_file(result_path):
+            continue
+
+        task_id = result_path.stem
+        try:
+            with result_path.open("r", encoding="utf-8") as f:
+                result_content = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(f"读取笔记结果失败，跳过 {result_path}: {e}")
+            continue
+
+        status = TaskStatus.SUCCESS.value
+        message = ""
+        status_path = output_dir / f"{task_id}.status.json"
+        if status_path.exists():
+            try:
+                with status_path.open("r", encoding="utf-8") as f:
+                    status_content = json.load(f)
+                status = status_content.get("status", status)
+                message = status_content.get("message", "")
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f"读取任务状态失败，使用默认成功状态 {status_path}: {e}")
+
+        tasks.append({
+            "task_id": task_id,
+            "status": status,
+            "message": message,
+            "created_at": result_path.stat().st_mtime,
+            "result": result_content,
+        })
+
+    return sorted(tasks, key=lambda task: task["created_at"], reverse=True)
+
+
 def save_note_to_file(task_id: str, note):
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
     with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
@@ -77,10 +129,10 @@ def save_note_to_file(task_id: str, note):
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[]
+                  video_interval=0, grid_size=[], mode: str = "note"
                   ):
 
-    if not model_name or not provider_id:
+    if mode in {"note", "polished_transcript"} and (not model_name or not provider_id):
         raise HTTPException(status_code=400, detail="请选择模型和提供者")
 
     def _execute_note_task():
@@ -99,6 +151,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_understanding=video_understanding,
             video_interval=video_interval,
             grid_size=grid_size,
+            mode=mode,
         )
 
     logger.info(f"任务进入执行队列 (task_id={task_id})")
@@ -165,7 +218,8 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
-                                  data.extras, data.video_understanding, data.video_interval, data.grid_size)
+                                  data.extras, data.video_understanding, data.video_interval, data.grid_size,
+                                  data.mode or "note")
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -229,6 +283,11 @@ def get_task_status(task_id: str):
         "message": "任务排队中",
         "task_id": task_id
     })
+
+
+@router.get("/task_list")
+def get_task_list():
+    return R.success({"tasks": list_saved_tasks()})
 
 
 @router.get("/image_proxy")

@@ -142,15 +142,19 @@ def _do_download_whisper(model_size: str):
         _downloading[model_size] = "downloading"
         model_dir = get_model_dir("whisper")
         model_path = os.path.join(model_dir, f"whisper-{model_size}")
-        if Path(model_path).exists():
+        model_bin = Path(model_path) / "model.bin"
+        if model_bin.exists() and model_bin.stat().st_size > 0:
             _downloading[model_size] = "done"
             return
+        if Path(model_path).exists():
+            import shutil
+            shutil.rmtree(model_path)
         repo_id = MODEL_MAP.get(model_size)
         if not repo_id:
             _downloading[model_size] = "failed"
             return
         logger.info(f"开始下载 whisper 模型: {model_size}")
-        snapshot_download(repo_id, local_dir=model_path)
+        snapshot_download(repo_id, local_dir=model_path, max_workers=1)
         logger.info(f"whisper 模型下载完成: {model_size}")
         _downloading[model_size] = "done"
     except Exception as e:

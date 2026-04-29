@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { delete_task, generateNote } from '@/services/note.ts'
+import { delete_task, generateNote, GenerationMode } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 
 
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILD'
+export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'FAILD'
 
 export interface AudioMeta {
   cover_url: string
@@ -42,29 +42,41 @@ export interface Task {
   markdown: string|Markdown [] //为了兼容之前的笔记
   transcript: Transcript
   status: TaskStatus
+  platform: string
   audioMeta: AudioMeta
   createdAt: string
   formData: {
     video_url: string
+    source_type?: 'single' | 'uploader_batch'
     link: undefined | boolean
     screenshot: undefined | boolean
     platform: string
     quality: string
     model_name: string
     provider_id: string
+    style?: string
+    extras?: string
+    format?: string[]
+    mode?: GenerationMode
+    batch_limit?: number
+    skip_existing?: boolean
+    video_understanding?: boolean
+    video_interval?: number
+    grid_size?: number[]
   }
 }
 
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
-  addPendingTask: (taskId: string, platform: string) => void
+  addPendingTask: (taskId: string, platform: string, formData?: any) => void
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   removeTask: (id: string) => void
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
-  retryTask: (id: string) => void
+  retryTask: (id: string, payload?: any) => void
+  syncSavedTasks: (savedTasks: any[]) => void
 }
 
 export const useTaskStore = create<TaskStore>()(
@@ -185,6 +197,82 @@ export const useTaskStore = create<TaskStore>()(
           ),
         }))
       },
+
+      syncSavedTasks: savedTasks =>
+        set(state => {
+          const restoredTasks = savedTasks
+            .map(item => {
+              const result = item?.result || {}
+              const audioMeta = result.audio_meta || result.audioMeta || {}
+              const rawInfo = audioMeta.raw_info || {}
+              const platform = audioMeta.platform || item?.platform || ''
+              const videoUrl =
+                rawInfo.webpage_url ||
+                rawInfo.original_url ||
+                rawInfo.url ||
+                ''
+              const markdown = String(result.markdown || '')
+              const mode: GenerationMode = markdown.includes('## 校对文字稿')
+                ? 'polished_transcript'
+                : markdown.includes('## 简体中文文字稿')
+                  ? 'transcript'
+                  : 'note'
+
+              if (!item?.task_id || !result.markdown) return null
+
+              return {
+                id: item.task_id,
+                status: item.status || 'SUCCESS',
+                markdown: result.markdown,
+                transcript: result.transcript || {
+                  full_text: '',
+                  language: '',
+                  raw: null,
+                  segments: [],
+                },
+                platform,
+                createdAt: item.created_at
+                  ? new Date(item.created_at * 1000).toISOString()
+                  : new Date().toISOString(),
+                audioMeta: {
+                  cover_url: '',
+                  duration: 0,
+                  file_path: '',
+                  platform,
+                  raw_info: null,
+                  title: '',
+                  video_id: '',
+                  ...audioMeta,
+                },
+                formData: {
+                  video_url: videoUrl,
+                  link: true,
+                  screenshot: false,
+                  platform,
+                  quality: 'fast',
+                  model_name: result.model_name || '',
+                  provider_id: '',
+                  style: result.style || '',
+                  mode,
+                },
+              } as Task
+            })
+            .filter(Boolean) as Task[]
+
+          const restoredById = new Map(restoredTasks.map(task => [task.id, task]))
+          const mergedExisting = state.tasks.map(task => {
+            const restored = restoredById.get(task.id)
+            if (!restored) return task
+            restoredById.delete(task.id)
+            return task.status === 'SUCCESS' ? task : { ...task, ...restored }
+          })
+          const tasks = [...restoredById.values(), ...mergedExisting]
+
+          return {
+            tasks,
+            currentTaskId: state.currentTaskId || tasks[0]?.id || null,
+          }
+        }),
 
 
       removeTask: async id => {

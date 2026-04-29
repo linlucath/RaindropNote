@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/tooltip.tsx'
 import LazyImage from "@/components/LazyImage.tsx";
 import {FC, useState, useEffect, useMemo} from 'react'
+import { get_task_list } from '@/services/note.ts'
 
 interface NoteHistoryProps {
   onSelect: (taskId: string) => void
@@ -24,10 +25,18 @@ interface NoteHistoryProps {
 const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
   const tasks = useTaskStore(state => state.tasks)
   const removeTask = useTaskStore(state => state.removeTask)
+  const syncSavedTasks = useTaskStore(state => state.syncSavedTasks)
   // 确保baseURL没有尾部斜杠
   const baseURL = (String(import.meta.env.VITE_API_BASE_URL || 'api')).replace(/\/$/, '')
   const [rawSearch, setRawSearch] = useState('')
   const [search, setSearch] = useState('')
+
+  useEffect(() => {
+    get_task_list()
+      .then(res => syncSavedTasks(res?.tasks || []))
+      .catch(error => console.warn('同步历史任务失败', error))
+  }, [syncSavedTasks])
+
   const fuse = useMemo(() => new Fuse(tasks, {
     keys: ['audioMeta.title'],
     threshold: 0.4 // 匹配精度（越低越严格）
@@ -128,20 +137,30 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
             </div>
             <div className={'mt-2 flex items-center justify-between text-[10px]'}>
               <div className="shrink-0">
+                {task.formData?.mode === 'transcript' && (
+                  <div className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}>
+                    文字稿
+                  </div>
+                )}
+                {task.formData?.mode === 'polished_transcript' && (
+                  <div className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}>
+                    校对稿
+                  </div>
+                )}
                 {task.status === 'SUCCESS' && (
-                  <div className={'bg-primary w-10 rounded p-0.5 text-center text-white'}>
+                  <div className={'bg-primary inline-block w-10 rounded p-0.5 text-center text-white'}>
                     已完成
                   </div>
                 )}
                 {task.status !== 'SUCCESS' && task.status !== 'FAILED' ? (
-                  <div className={'w-10 rounded bg-green-500 p-0.5 text-center text-white'}>
+                  <div className={'inline-block w-10 rounded bg-green-500 p-0.5 text-center text-white'}>
                     等待中
                   </div>
                 ) : (
                   <></>
                 )}
                 {task.status === 'FAILED' && (
-                  <div className={'w-10 rounded bg-red-500 p-0.5 text-center text-white'}>失败</div>
+                  <div className={'inline-block w-10 rounded bg-red-500 p-0.5 text-center text-white'}>失败</div>
                 )}
               </div>
 

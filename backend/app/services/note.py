@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
@@ -96,6 +97,7 @@ class NoteGenerator:
         video_understanding: bool = False,
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
+        mode: str = "note",
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -115,10 +117,14 @@ class NoteGenerator:
         :param video_understanding: 是否需要视频拼图理解（生成缩略图）
         :param video_interval: 视频帧截取间隔（秒），仅在 video_understanding 为 True 时生效
         :param grid_size: 生成缩略图时的网格大小，如 [3, 3]
+        :param mode: 生成模式，"note" 为 AI 笔记，"transcript" 为仅转写文字稿，
+            "polished_transcript" 为大模型校对文字稿
         :return: NoteResult 对象，包含 markdown 文本、转写结果和音频元信息
         """
         if grid_size is None:
             grid_size = []
+        is_transcript_only = mode == "transcript"
+        is_polished_transcript = mode == "polished_transcript"
 
         try:
             logger.info(f"开始生成笔记 (task_id={task_id})")
@@ -127,7 +133,7 @@ class NoteGenerator:
             # 获取下载器与 GPT 实例
 
             downloader = self._get_downloader(platform)
-            gpt = self._get_gpt(model_name, provider_id)
+            gpt = None if is_transcript_only else self._get_gpt(model_name, provider_id)
 
             # 缓存文件路径
             audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
@@ -199,6 +205,34 @@ class NoteGenerator:
                     task_id=task_id,
                 )
 
+            if is_transcript_only:
+                markdown = self._build_transcript_markdown(audio_meta=audio_meta, transcript=transcript)
+                markdown_cache_file.write_text(markdown, encoding="utf-8")
+                markdown = prepend_source_link(markdown, str(video_url))
+
+                self._update_status(task_id, TaskStatus.SAVING)
+                self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
+
+                self._update_status(task_id, TaskStatus.SUCCESS)
+                logger.info(f"文字稿生成成功 (task_id={task_id})")
+                return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+
+            if is_polished_transcript:
+                markdown = self._polish_transcript(
+                    audio_meta=audio_meta,
+                    transcript=transcript,
+                    gpt=gpt,
+                    markdown_cache_file=markdown_cache_file,
+                )
+                markdown = prepend_source_link(markdown, str(video_url))
+
+                self._update_status(task_id, TaskStatus.SAVING)
+                self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
+
+                self._update_status(task_id, TaskStatus.SUCCESS)
+                logger.info(f"校对文字稿生成成功 (task_id={task_id})")
+                return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+
             # 3. GPT 总结
             markdown = self._summarize_text(
                 audio_meta=audio_meta,
@@ -262,7 +296,7 @@ class NoteGenerator:
             raise Exception(f"不支持的转写器：{self.transcriber_type}")
 
         logger.info(f"使用转写器：{self.transcriber_type}")
-        return get_transcriber(transcriber_type=self.transcriber_type)
+        return get_transcriber(transcriber_type=self.transcriber_type, model_size=self.model_size)
 
     def _get_gpt(self, model_name: Optional[str], provider_id: Optional[str]) -> GPT:
         """
@@ -284,6 +318,100 @@ class NoteGenerator:
             name=provider["name"],
         )
         return GPTFactory().from_config(config)
+
+    @staticmethod
+    def _format_timestamp(seconds: float) -> str:
+        total_seconds = int(seconds or 0)
+        minutes, secs = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    @staticmethod
+    def _simplify_chinese(text: str) -> str:
+        if not text:
+            return ""
+
+        try:
+            from opencc import OpenCC
+            return OpenCC("t2s").convert(text)
+        except Exception:
+            phrase_map = {
+                "視頻": "视频",
+            }
+            for source, target in phrase_map.items():
+                text = text.replace(source, target)
+            fallback_map = str.maketrans({
+                "這": "这", "個": "个", "視": "视", "頻": "频",
+                "學": "学", "習": "习", "後": "后", "還": "还", "補": "补",
+                "觀": "观", "點": "点", "測": "测", "試": "试", "裏": "里",
+                "裡": "里", "與": "与", "為": "为", "會": "会", "說": "说",
+                "講": "讲", "讓": "让", "對": "对", "開": "开", "關": "关",
+                "題": "题", "體": "体", "現": "现", "實": "实", "應": "应",
+                "產": "产", "業": "业", "經": "经", "營": "营", "專": "专",
+                "區": "区", "並": "并", "從": "从", "變": "变", "種": "种",
+                "時": "时", "間": "间", "線": "线", "錄": "录", "轉": "转",
+                "寫": "写", "長": "长", "標": "标", "簡": "简", "體": "体",
+            })
+            return text.translate(fallback_map)
+
+    @staticmethod
+    def _normalize_transcript_text(text: str) -> str:
+        simplified = NoteGenerator._simplify_chinese(text.strip())
+        simplified = re.sub(r"\s+", " ", simplified)
+        simplified = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", simplified)
+        return simplified
+
+    @staticmethod
+    def _build_transcript_markdown(audio_meta: AudioDownloadResult, transcript: TranscriptResult) -> str:
+        title = NoteGenerator._normalize_transcript_text(audio_meta.title or "未命名视频")
+        segment_texts = [
+            NoteGenerator._normalize_transcript_text(segment.text)
+            for segment in transcript.segments
+            if segment.text and segment.text.strip()
+        ]
+        readable_text = NoteGenerator._normalize_transcript_text("".join(segment_texts))
+        timestamp_lines = [
+            f"[{NoteGenerator._format_timestamp(segment.start)}] {NoteGenerator._normalize_transcript_text(segment.text)}"
+            for segment in transcript.segments
+            if segment.text and segment.text.strip()
+        ]
+
+        return "\n\n".join([
+            f"# {title}",
+            "## 简体中文文字稿",
+            readable_text or NoteGenerator._normalize_transcript_text(transcript.full_text or ""),
+            "## 带时间戳文字稿",
+            "\n".join(timestamp_lines),
+        ]).strip()
+
+    def _polish_transcript(
+        self,
+        audio_meta: AudioDownloadResult,
+        transcript: TranscriptResult,
+        gpt: GPT,
+        markdown_cache_file: Path,
+    ) -> str:
+        task_id = markdown_cache_file.stem
+        self._update_status(task_id, TaskStatus.SUMMARIZING)
+
+        source = GPTSource(
+            title=audio_meta.title,
+            segment=transcript.segments,
+            tags=audio_meta.raw_info.get("tags", []),
+            checkpoint_key=task_id,
+        )
+        polished_text = gpt.polish_transcript(source).strip()
+        title = self._normalize_transcript_text(audio_meta.title or "未命名视频")
+        markdown = "\n\n".join([
+            f"# {title}",
+            "## 校对文字稿",
+            polished_text,
+        ]).strip()
+        markdown_cache_file.write_text(markdown, encoding="utf-8")
+        logger.info(f"GPT 校对文字稿并缓存成功 ({markdown_cache_file})")
+        return markdown
 
     def _get_downloader(self, platform: str) -> Downloader:
         """
