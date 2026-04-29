@@ -8,7 +8,15 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.gpt.prompt import BASE_PROMPT, AI_SUM, SCREENSHOT, LINK, MERGE_PROMPT
+from app.gpt.prompt import (
+    BASE_PROMPT,
+    AI_SUM,
+    SCREENSHOT,
+    LINK,
+    MERGE_PROMPT,
+    POLISHED_TRANSCRIPT_PROMPT,
+    POLISHED_TRANSCRIPT_MERGE_PROMPT,
+)
 from app.gpt.utils import fix_markdown
 from app.gpt.request_chunker import RequestChunker
 from app.models.transcriber_model import TranscriptSegment
@@ -83,6 +91,24 @@ class UniversalGPT(GPT):
 
     def _build_merge_messages(self, partials: list) -> list:
         merge_text = MERGE_PROMPT + "\n\n" + "\n\n---\n\n".join(partials)
+        return [{
+            "role": "user",
+            "content": [{"type": "text", "text": merge_text}]
+        }]
+
+    def _build_polished_transcript_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
+        prompt = POLISHED_TRANSCRIPT_PROMPT.format(
+            video_title=kwargs.get("title"),
+            segment_text=self._build_segment_text(segments),
+            tags=kwargs.get("tags"),
+        )
+        return [{
+            "role": "user",
+            "content": [{"type": "text", "text": prompt}]
+        }]
+
+    def _build_polished_transcript_merge_messages(self, partials: list) -> list:
+        merge_text = POLISHED_TRANSCRIPT_MERGE_PROMPT + "\n\n" + "\n\n---\n\n".join(partials)
         return [{
             "role": "user",
             "content": [{"type": "text", "text": merge_text}]
@@ -305,3 +331,49 @@ class UniversalGPT(GPT):
         if checkpoint_key:
             self._clear_checkpoint(checkpoint_key)
         return merged
+
+    def polish_transcript(self, source: GPTSource) -> str:
+        source.segment = self.ensure_segments_type(source.segment)
+
+        def message_builder(segments, _image_urls=None, **kwargs):
+            return self._build_polished_transcript_messages(segments, **kwargs)
+
+        chunker = RequestChunker(message_builder, self.max_request_bytes, self._estimate_messages_bytes)
+        chunks = chunker.chunk(
+            source.segment,
+            [],
+            title=source.title,
+            tags=source.tags,
+        )
+
+        partials = []
+        for chunk in chunks:
+            messages = self._build_polished_transcript_messages(
+                chunk.segments,
+                title=source.title,
+                tags=source.tags,
+            )
+            response = self._chat_completion_create(messages)
+            partials.append(response.choices[0].message.content.strip())
+
+        partials = [part for part in partials if part]
+        if len(partials) <= 1:
+            return partials[0] if partials else ""
+
+        def build_messages(texts, *_args, **_kwargs):
+            return self._build_polished_transcript_merge_messages(texts)
+
+        merge_chunker = RequestChunker(
+            lambda *_args, **_kwargs: [],
+            self.max_request_bytes,
+            self._estimate_messages_bytes
+        )
+        current_partials = partials
+        while len(current_partials) > 1:
+            groups = merge_chunker.group_texts_by_budget(current_partials, build_messages)
+            current_partials = [
+                self._chat_completion_create(build_messages(group)).choices[0].message.content.strip()
+                for group in groups
+            ]
+
+        return current_partials[0].strip()

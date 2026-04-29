@@ -50,13 +50,18 @@ class WhisperTranscriber(Transcriber):
 
         model_dir = get_model_dir("whisper")
         model_path = os.path.join(model_dir, f"whisper-{model_size}")
-        if not Path(model_path).exists():
+        model_bin = Path(model_path) / "model.bin"
+        if not model_bin.exists() or model_bin.stat().st_size <= 0:
+            if Path(model_path).exists():
+                import shutil
+                shutil.rmtree(model_path)
             logger.info(f"模型 whisper-{model_size} 不存在，开始下载...")
             repo_id = MODEL_MAP[model_size]
             model_path = snapshot_download(
                 repo_id,
 
                 local_dir=model_path,
+                max_workers=1,
             )
             logger.info("模型下载完成")
 
@@ -125,4 +130,3 @@ class WhisperTranscriber(Transcriber):
         transcription_finished.send({
             "file_path": video_path,
         })
-

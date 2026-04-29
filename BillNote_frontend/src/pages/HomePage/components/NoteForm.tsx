@@ -8,13 +8,13 @@ import {
   FormMessage,
 } from '@/components/ui/form.tsx'
 import { useEffect,useState } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { FieldErrors, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
 import { Info, Loader2, Plus } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
-import { generateNote } from '@/services/note.ts'
+import { BatchVideo, GenerationMode, generateNote, getBatchStatus, previewBatchVideos, startBatch } from '@/services/note.ts'
 import { uploadFile } from '@/services/upload.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
@@ -44,13 +44,17 @@ import { useNavigate } from 'react-router-dom'
 const formSchema = z
   .object({
     video_url: z.string().optional(),
+    source_type: z.enum(['single', 'uploader_batch']).default('single'),
+    mode: z.enum(['note', 'polished_transcript', 'transcript']).default('note'),
+    batch_limit: z.coerce.number().min(1).max(100).default(10).optional(),
+    skip_existing: z.boolean().default(true).optional(),
     platform: z.string().nonempty('请选择平台'),
     quality: z.enum(['fast', 'medium', 'slow']),
     screenshot: z.boolean().optional(),
     link: z.boolean().optional(),
-    model_name: z.string().nonempty('请选择模型'),
+    model_name: z.string().optional(),
     format: z.array(z.string()).default([]),
-    style: z.string().nonempty('请选择笔记生成风格'),
+    style: z.string().optional(),
     extras: z.string().optional(),
     video_understanding: z.boolean().optional(),
     video_interval: z.coerce.number().min(1).max(30).default(6).optional(),
@@ -59,8 +63,14 @@ const formSchema = z
       .default([2, 2])
       .optional(),
   })
-  .superRefine(({ video_url, platform }, ctx) => {
-    if (platform === 'local') {
+  .superRefine(({ video_url, platform, source_type, mode, model_name, style }, ctx) => {
+    if (source_type === 'uploader_batch') {
+      if (!video_url) {
+        ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
+      } else if (!video_url.includes('space.bilibili.com')) {
+        ctx.addIssue({ code: 'custom', message: '请输入 B 站 UP 主主页链接', path: ['video_url'] })
+      }
+    } else if (platform === 'local') {
       if (!video_url) {
         ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
       }
@@ -78,6 +88,16 @@ const formSchema = z
         catch {
           ctx.addIssue({ code: 'custom', message: '请输入正确的视频链接', path: ['video_url'] })
         }
+      }
+    }
+    if (mode !== 'transcript') {
+      if (!model_name) {
+        ctx.addIssue({ code: 'custom', message: '请选择模型', path: ['model_name'] })
+      }
+    }
+    if (mode === 'note') {
+      if (!style) {
+        ctx.addIssue({ code: 'custom', message: '请选择笔记生成风格', path: ['style'] })
       }
     }
   })
@@ -141,6 +161,10 @@ const NoteForm = () => {
     resolver: zodResolver(formSchema),
     defaultValues: {
       platform: 'bilibili',
+      source_type: 'single',
+      mode: 'note',
+      batch_limit: 10,
+      skip_existing: true,
       quality: 'medium',
       model_name: modelList[0]?.model_name || '',
       style: 'minimal',
@@ -150,10 +174,20 @@ const NoteForm = () => {
     },
   })
   const currentTask = getCurrentTask()
+  const [previewVideos, setPreviewVideos] = useState<BatchVideo[]>([])
+  const [batchId, setBatchId] = useState<string | null>(null)
+  const [batchStatus, setBatchStatus] = useState<any>(null)
+  const [batchLoading, setBatchLoading] = useState(false)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
+  const sourceType = useWatch({ control: form.control, name: 'source_type' }) as 'single' | 'uploader_batch'
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
+  const mode = useWatch({ control: form.control, name: 'mode' }) as GenerationMode
   const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
+  const transcriptOnly = mode === 'transcript'
+  const transcriptMode = mode !== 'note'
+  const usesModel = mode !== 'transcript'
+  const batchMode = sourceType === 'uploader_batch'
   const editing = currentTask && currentTask.id
 
   const goModelAdd = () => {
@@ -173,6 +207,8 @@ const NoteForm = () => {
 
     form.reset({
       platform: formData.platform || 'bilibili',
+      source_type: formData.source_type || 'single',
+      mode: formData.mode || 'note',
       video_url: formData.video_url || '',
       model_name: formData.model_name || modelList[0]?.model_name || '',
       style: formData.style || 'minimal',
@@ -218,10 +254,35 @@ const NoteForm = () => {
 
   const onSubmit = async (values: NoteFormValues) => {
     console.log('Not even go here')
+    const selectedModel = modelList.find(m => m.model_name === values.model_name)
+
+    if (values.source_type === 'uploader_batch') {
+      const videos = previewVideos.length
+        ? previewVideos
+        : (await previewBatchVideos({ space_url: values.video_url || '', limit: values.batch_limit || 10 })).videos
+      setPreviewVideos(videos)
+      setBatchLoading(true)
+      const data = await startBatch({
+        videos,
+        mode: values.mode,
+        quality: values.quality,
+        skip_existing: values.skip_existing ?? true,
+        concurrency: 1,
+        model_name: values.mode === 'transcript' ? undefined : values.model_name,
+        provider_id: values.mode === 'transcript' ? undefined : selectedModel?.provider_id,
+      })
+      setBatchId(data.batch_id)
+      setBatchStatus({ status: 'PENDING', total: videos.length, completed: 0, items: [] })
+      return
+    }
+
     const payload: NoteFormValues = {
       ...values,
-      provider_id: modelList.find(m => m.model_name === values.model_name)!.provider_id,
+      provider_id: values.mode === 'transcript' ? undefined : selectedModel?.provider_id,
       task_id: currentTaskId || '',
+      screenshot: transcriptMode ? false : values.screenshot,
+      video_understanding: transcriptMode ? false : values.video_understanding,
+      format: transcriptMode ? [] : values.format,
     }
     if (currentTaskId) {
       retryTask(currentTaskId, payload)
@@ -242,16 +303,18 @@ const NoteForm = () => {
     setCurrentTask(null)
   }
   const FormButton = () => {
-    const label = generating ? '正在生成…' : editing ? '重新生成' : '生成笔记'
+    const batchRunning = batchStatus && !['SUCCESS', 'FAILED'].includes(batchStatus.status)
+    const baseLabel = batchMode ? '开始批量处理' : transcriptOnly ? '生成文字稿' : mode === 'polished_transcript' ? '校对文字稿' : '生成笔记'
+    const label = generating || batchRunning ? '正在生成…' : editing ? '重新生成' : baseLabel
 
     return (
       <div className="flex gap-2">
         <Button
           type="submit"
           className={!editing ? 'w-full' : 'w-2/3' + ' bg-primary'}
-          disabled={generating}
+          disabled={generating || batchRunning}
         >
-          {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {(generating || batchRunning) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {label}
         </Button>
 
@@ -265,6 +328,33 @@ const NoteForm = () => {
     )
   }
 
+  const handlePreviewBatch = async () => {
+    const values = form.getValues()
+    setBatchLoading(true)
+    try {
+      const data = await previewBatchVideos({
+        space_url: values.video_url || '',
+        limit: values.batch_limit || 10,
+      })
+      setPreviewVideos(data.videos || [])
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!batchId) return
+    const timer = setInterval(async () => {
+      const data = await getBatchStatus(batchId)
+      setBatchStatus(data)
+      if (['SUCCESS', 'FAILED'].includes(data.status)) {
+        setBatchLoading(false)
+        clearInterval(timer)
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [batchId])
+
   /* -------------------- 渲染 -------------------- */
   return (
     <div className="h-full w-full">
@@ -273,49 +363,119 @@ const NoteForm = () => {
           {/* 顶部按钮 */}
           <FormButton></FormButton>
 
+          <FormField
+            control={form.control}
+            name="source_type"
+            render={({ field }) => (
+              <FormItem>
+                <SectionHeader title="处理范围" tip="单视频处理一个链接，UP 主批量会先预览最近投稿" />
+                <Select
+                  disabled={!!editing}
+                  value={field.value}
+                  onValueChange={value => {
+                    field.onChange(value)
+                    if (value === 'uploader_batch') {
+                      form.setValue('platform', 'bilibili')
+                      form.setValue('mode', 'transcript')
+                      setPreviewVideos([])
+                      setBatchStatus(null)
+                    }
+                  }}
+                  defaultValue={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="single">单视频</SelectItem>
+                    <SelectItem value="uploader_batch">UP 主批量</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="mode"
+            render={({ field }) => (
+              <FormItem>
+                <SectionHeader title="生成类型" tip="校对文字稿会用大模型修正断句和分段；仅转写不消耗大模型 token" />
+                <Select
+                  disabled={!!editing}
+                  value={field.value}
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                >
+                  <FormControl>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="note">AI 笔记</SelectItem>
+                    <SelectItem value="polished_transcript">校对文字稿</SelectItem>
+                    <SelectItem value="transcript">仅转写</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
           {/* 视频链接 & 平台 */}
-          <SectionHeader title="视频链接" tip="支持 B 站、YouTube 等平台" />
+          <SectionHeader
+            title={batchMode ? 'UP 主主页' : '视频链接'}
+            tip={batchMode ? '例如 https://space.bilibili.com/16385920/upload/video' : '支持 B 站、YouTube 等平台'}
+          />
           <div className="flex gap-2">
             {/* 平台选择 */}
 
-            <FormField
-              control={form.control}
-              name="platform"
-              render={({ field }) => (
-                <FormItem>
-                  <Select
-                    disabled={!!editing}
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {videoPlatforms?.map(p => (
-                        <SelectItem key={p.value} value={p.value}>
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="h-4 w-4">{p.logo()}</div>
-                            <span>{p.label}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage style={{ display: 'none' }} />
-                </FormItem>
-              )}
-            />
+            {!batchMode && (
+              <FormField
+                control={form.control}
+                name="platform"
+                render={({ field }) => (
+                  <FormItem>
+                    <Select
+                      disabled={!!editing}
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {videoPlatforms?.map(p => (
+                          <SelectItem key={p.value} value={p.value}>
+                            <div className="flex items-center justify-center gap-2">
+                              <div className="h-4 w-4">{p.logo()}</div>
+                              <span>{p.label}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage style={{ display: 'none' }} />
+                  </FormItem>
+                )}
+              />
+            )}
             {/* 链接输入 / 上传框 */}
             <FormField
               control={form.control}
               name="video_url"
               render={({ field }) => (
                 <FormItem className="flex-1">
-                  {platform === 'local' ? (
+                  {batchMode ? (
+                    <Input disabled={!!editing} placeholder="请输入 UP 主主页链接" {...field} />
+                  ) : platform === 'local' ? (
                     <>
                       <Input disabled={!!editing} placeholder="请输入本地视频路径" {...field} />
                     </>
@@ -333,7 +493,7 @@ const NoteForm = () => {
             name="video_url"
             render={({ field }) => (
               <FormItem className="flex-1">
-                {platform === 'local' && (
+                {!batchMode && platform === 'local' && (
                   <>
                     <div
                       className="hover:border-primary mt-2 flex h-40 cursor-pointer items-center justify-center rounded-md border-2 border-dashed border-gray-300 transition-colors"
@@ -374,6 +534,70 @@ const NoteForm = () => {
               </FormItem>
             )}
           />
+          {batchMode && (
+            <div className="rounded-md border border-neutral-200 p-3">
+              <div className="grid grid-cols-2 gap-3">
+                <FormField
+                  control={form.control}
+                  name="batch_limit"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>最近视频数</FormLabel>
+                      <Input type="number" min={1} max={100} {...field} />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="skip_existing"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>跳过已处理</FormLabel>
+                      <div className="flex h-10 items-center gap-2">
+                        <Checkbox checked={!!field.value} onCheckedChange={field.onChange} />
+                        <span className="text-sm text-neutral-600">开启</span>
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 w-full"
+                disabled={batchLoading}
+                onClick={handlePreviewBatch}
+              >
+                {batchLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                预览视频列表
+              </Button>
+              {previewVideos.length > 0 && (
+                <div className="mt-3 max-h-40 overflow-y-auto rounded border border-neutral-100 bg-neutral-50 p-2 text-xs">
+                  {previewVideos.map((video, index) => (
+                    <div key={video.video_id} className="flex items-center gap-2 py-1">
+                      <span className="w-6 text-neutral-400">{index + 1}</span>
+                      <span className="font-mono">{video.video_id}</span>
+                      <span className="truncate text-neutral-600">{video.title || video.video_url}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {batchStatus && (
+                <div className="mt-3 rounded bg-neutral-50 p-2 text-xs text-neutral-700">
+                  批量状态：{batchStatus.status}，进度：{batchStatus.completed || 0}/{batchStatus.total || 0}
+                  {batchStatus.items?.slice(0, 5).map(item => (
+                    <div key={item.video_id} className="mt-1 flex gap-2">
+                      <span className="font-mono">{item.video_id}</span>
+                      <span>{item.status}</span>
+                      {item.message && <span className="truncate text-neutral-500">{item.message}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             {/* 模型选择 */}
             {
@@ -386,6 +610,7 @@ const NoteForm = () => {
                  <FormItem>
                    <SectionHeader title="模型选择" tip="不同模型效果不同，建议自行测试" />
                    <Select
+                     disabled={!usesModel}
                      onOpenChange={()=>{
                        loadEnabledModels()
                      }}
@@ -429,6 +654,7 @@ const NoteForm = () => {
                 <FormItem>
                   <SectionHeader title="笔记风格" tip="选择生成笔记的呈现风格" />
                   <Select
+                    disabled={transcriptMode}
                     value={field.value}
                     onValueChange={field.onChange}
                     defaultValue={field.value}
@@ -462,8 +688,9 @@ const NoteForm = () => {
                   <div className="flex items-center gap-2">
                     <FormLabel>启用</FormLabel>
                     <Checkbox
+                      disabled={transcriptMode}
                       checked={videoUnderstandingEnabled}
-                      onCheckedChange={v => form.setValue('video_understanding', v)}
+                      onCheckedChange={v => form.setValue('video_understanding', transcriptMode ? false : v)}
                     />
                   </div>
                   <FormMessage />
@@ -479,7 +706,7 @@ const NoteForm = () => {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>采样间隔（秒）</FormLabel>
-                    <Input disabled={!videoUnderstandingEnabled} type="number" {...field} />
+                    <Input disabled={transcriptMode || !videoUnderstandingEnabled} type="number" {...field} />
                     <FormMessage />
                   </FormItem>
                 )}
@@ -493,7 +720,7 @@ const NoteForm = () => {
                     <FormLabel>拼图尺寸（列 × 行）</FormLabel>
                     <div className="flex items-center space-x-2">
                       <Input
-                        disabled={!videoUnderstandingEnabled}
+                        disabled={transcriptMode || !videoUnderstandingEnabled}
                         type="number"
                         value={field.value?.[0] || 3}
                         onChange={e => field.onChange([+e.target.value, field.value?.[1] || 3])}
@@ -501,7 +728,7 @@ const NoteForm = () => {
                       />
                       <span>x</span>
                       <Input
-                        disabled={!videoUnderstandingEnabled}
+                        disabled={transcriptMode || !videoUnderstandingEnabled}
                         type="number"
                         value={field.value?.[1] || 3}
                         onChange={e => field.onChange([field.value?.[0] || 3, +e.target.value])}
@@ -531,8 +758,10 @@ const NoteForm = () => {
                   value={field.value}
                   onChange={field.onChange}
                   disabledMap={{
-                    link: platform === 'local',
-                    screenshot: !videoUnderstandingEnabled,
+                    link: transcriptMode || platform === 'local',
+                    screenshot: transcriptMode || !videoUnderstandingEnabled,
+                    toc: transcriptMode,
+                    summary: transcriptMode,
                   }}
                 />
                 <FormMessage />
@@ -547,7 +776,7 @@ const NoteForm = () => {
             render={({ field }) => (
               <FormItem>
                 <SectionHeader title="备注" tip="可在 Prompt 结尾附加自定义说明" />
-                <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
+                <Textarea disabled={transcriptMode} placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
                 <FormMessage />
               </FormItem>
             )}

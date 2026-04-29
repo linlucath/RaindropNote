@@ -200,6 +200,8 @@ db.sqlite3-journal
 # Flask stuff:
 instance/
 .webassets-cache
+backend/cookies.txt
+backend/app/db/bili_note.db
 
 # Scrapy stuff:
 .scrapy

@@ -1,19 +1,22 @@
 import request from '@/utils/request'
 import toast from 'react-hot-toast'
 
+export type GenerationMode = 'note' | 'transcript' | 'polished_transcript'
+
 export const generateNote = async (data: {
   video_url: string
   platform: string
   quality: string
-  model_name: string
-  provider_id: string
+  model_name?: string
+  provider_id?: string
   task_id?: string
   format: Array<string>
-  style: string
+  style?: string
   extras?: string
   video_understand?: boolean
   video_interval?: number
   grid_size: Array<number>
+  mode?: GenerationMode
 }) => {
   try {
     console.log('generateNote', data)
@@ -72,4 +75,39 @@ export const get_task_status = async (task_id: string) => {
 
     throw e // 抛出错误以便调用方处理
   }
+}
+
+export const get_task_list = async () => {
+  try {
+    return await request.get('/task_list')
+  } catch (e) {
+    console.error('❌ 获取历史任务失败', e)
+    throw e
+  }
+}
+
+export interface BatchVideo {
+  video_id: string
+  video_url: string
+  title?: string
+}
+
+export const previewBatchVideos = async (data: { space_url: string; limit: number }) => {
+  return await request.post('/batch/preview', data)
+}
+
+export const startBatch = async (data: {
+  videos: BatchVideo[]
+  mode: GenerationMode
+  quality: string
+  skip_existing: boolean
+  concurrency: number
+  model_name?: string
+  provider_id?: string
+}) => {
+  return await request.post('/batch/start', data)
+}
+
+export const getBatchStatus = async (batchId: string) => {
+  return await request.get('/batch/status/' + batchId)
 }

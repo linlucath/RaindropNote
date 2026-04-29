@@ -13,5 +13,7 @@ class GPT(ABC):
         pass
     def create_messages(self, segments:list,**kwargs)->list:
         pass
+    def polish_transcript(self, source:GPTSource)->str:
+        pass
     def list_models(self):
         pass
