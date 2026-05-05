@@ -264,7 +264,14 @@ export const useTaskStore = create<TaskStore>()(
             const restored = restoredById.get(task.id)
             if (!restored) return task
             restoredById.delete(task.id)
-            return task.status === 'SUCCESS' ? task : { ...task, ...restored }
+            return {
+              ...task,
+              ...restored,
+              formData: {
+                ...task.formData,
+                ...restored.formData,
+              },
+            }
           })
           const tasks = [...restoredById.values(), ...mergedExisting]
 
