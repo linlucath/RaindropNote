@@ -14,14 +14,17 @@ from app.gpt.prompt import (
     SCREENSHOT,
     LINK,
     MERGE_PROMPT,
+    POLISHED_TRANSCRIPT_CHUNK_PROMPT,
     POLISHED_TRANSCRIPT_PROMPT,
     POLISHED_TRANSCRIPT_MERGE_PROMPT,
+    POLISHED_TRANSCRIPT_REPAIR_PROMPT,
 )
 from app.gpt.utils import fix_markdown
 from app.gpt.request_chunker import RequestChunker
 from app.models.transcriber_model import TranscriptSegment
 from datetime import timedelta
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class UniversalGPT(GPT):
@@ -32,6 +35,7 @@ class UniversalGPT(GPT):
         self.screenshot = False
         self.link = False
         self.max_request_bytes = int(os.getenv("OPENAI_MAX_REQUEST_BYTES", str(45 * 1024 * 1024)))
+        self.polished_transcript_max_source_chars = int(os.getenv("POLISHED_TRANSCRIPT_MAX_SOURCE_CHARS", "4000"))
         self.checkpoint_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         # 初始化时缓存重试配置，避免每次请求重复读取环境变量
@@ -97,7 +101,20 @@ class UniversalGPT(GPT):
         }]
 
     def _build_polished_transcript_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
+        section_guidance = self._polished_transcript_section_guidance(segments)
         prompt = POLISHED_TRANSCRIPT_PROMPT.format(
+            video_title=kwargs.get("title"),
+            segment_text=self._build_segment_text(segments),
+            tags=kwargs.get("tags"),
+            section_guidance=section_guidance,
+        )
+        return [{
+            "role": "user",
+            "content": [{"type": "text", "text": prompt}]
+        }]
+
+    def _build_polished_transcript_chunk_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
+        prompt = POLISHED_TRANSCRIPT_CHUNK_PROMPT.format(
             video_title=kwargs.get("title"),
             segment_text=self._build_segment_text(segments),
             tags=kwargs.get("tags"),
@@ -112,6 +129,23 @@ class UniversalGPT(GPT):
         return [{
             "role": "user",
             "content": [{"type": "text", "text": merge_text}]
+        }]
+
+    def _build_polished_transcript_repair_messages(
+        self,
+        segments: List[TranscriptSegment],
+        draft_text: str,
+        **kwargs,
+    ) -> list:
+        prompt = POLISHED_TRANSCRIPT_REPAIR_PROMPT.format(
+            video_title=kwargs.get("title"),
+            segment_text=self._build_segment_text(segments),
+            tags=kwargs.get("tags"),
+            draft_text=draft_text,
+        )
+        return [{
+            "role": "user",
+            "content": [{"type": "text", "text": prompt}]
         }]
 
     def _checkpoint_path(self, checkpoint_key: str) -> Path:
@@ -140,6 +174,128 @@ class UniversalGPT(GPT):
         }
         raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _polished_transcript_section_guidance(self, segments: List[TranscriptSegment]) -> str:
+        text_length = sum(len((getattr(seg, "text", "") or "").strip()) for seg in segments)
+        if text_length >= 12000:
+            return "6-12 个 `##` 章节"
+        if text_length >= 5000:
+            return "4-8 个 `##` 章节"
+        return "3-6 个 `##` 章节"
+
+    @staticmethod
+    def _strip_markdown_for_length(text: str) -> str:
+        cleaned = text or ""
+        replacements = (
+            ("**", ""),
+            ("### ", ""),
+            ("## ", ""),
+            ("# ", ""),
+            ("`", ""),
+            ("> ", ""),
+            ("-", " "),
+            ("*", ""),
+        )
+        for old, new in replacements:
+            cleaned = cleaned.replace(old, new)
+        return " ".join(cleaned.split())
+
+    def _source_text_length(self, segments: List[TranscriptSegment]) -> int:
+        return sum(len((getattr(seg, "text", "") or "").strip()) for seg in segments)
+
+    def _needs_polished_transcript_repair(self, segments: List[TranscriptSegment], draft_text: str) -> bool:
+        source_length = self._source_text_length(segments)
+        if source_length <= 0:
+            return False
+
+        output_length = len(self._strip_markdown_for_length(draft_text))
+        ratio = output_length / source_length
+        threshold = 0.72 if source_length < 12000 else 0.82
+        return ratio < threshold
+
+    def _repair_polished_transcript(self, source: GPTSource, draft_text: str) -> str:
+        messages = self._build_polished_transcript_repair_messages(
+            source.segment,
+            draft_text,
+            title=source.title,
+            tags=source.tags,
+        )
+        response = self._chat_completion_create(messages)
+        repaired = (response.choices[0].message.content or "").strip()
+        return repaired or draft_text
+
+    def _polished_transcript_max_workers(self) -> int:
+        workers = int(os.getenv("POLISHED_TRANSCRIPT_MAX_WORKERS", "3"))
+        return max(1, min(workers, 8))
+
+    def _split_polished_transcript_segments(
+        self,
+        segments: List[TranscriptSegment],
+        title: str,
+        tags,
+    ):
+        budget = max(500, self.polished_transcript_max_source_chars)
+        coarse_groups: List[List[TranscriptSegment]] = []
+        current_group: List[TranscriptSegment] = []
+        current_chars = 0
+
+        for segment in segments:
+            segment_text = (getattr(segment, "text", "") or "").strip()
+            segment_chars = len(segment_text)
+
+            if current_group and current_chars + segment_chars > budget:
+                coarse_groups.append(current_group)
+                current_group = []
+                current_chars = 0
+
+            current_group.append(segment)
+            current_chars += segment_chars
+
+        if current_group:
+            coarse_groups.append(current_group)
+
+        def message_builder(group_segments, _image_urls=None, **kwargs):
+            return self._build_polished_transcript_chunk_messages(group_segments, **kwargs)
+
+        byte_chunker = RequestChunker(message_builder, self.max_request_bytes, self._estimate_messages_bytes)
+        chunks = []
+        for group in coarse_groups:
+            chunks.extend(byte_chunker.chunk(group, [], title=title, tags=tags))
+        return chunks
+
+    def _repair_polished_transcript_segments(self, segments: List[TranscriptSegment], draft_text: str, title: str, tags) -> str:
+        messages = self._build_polished_transcript_repair_messages(
+            segments,
+            draft_text,
+            title=title,
+            tags=tags,
+        )
+        response = self._chat_completion_create(messages)
+        repaired = (response.choices[0].message.content or "").strip()
+        return repaired or draft_text
+
+    def _polish_transcript_chunk(self, chunk, title: str, tags) -> str:
+        messages = self._build_polished_transcript_chunk_messages(
+            chunk.segments,
+            title=title,
+            tags=tags,
+        )
+        response = self._chat_completion_create(messages)
+        draft = (response.choices[0].message.content or "").strip()
+        if draft and self._needs_polished_transcript_repair(chunk.segments, draft):
+            return self._repair_polished_transcript_segments(chunk.segments, draft, title, tags)
+        return draft
+
+    @staticmethod
+    def _stitch_polished_transcript_partials(partials: List[str]) -> str:
+        cleaned = [part.strip() for part in partials if part and part.strip()]
+        if not cleaned:
+            return ""
+        stitched = "\n\n".join(cleaned)
+        stitched = stitched.replace("\r\n", "\n")
+        while "\n\n\n" in stitched:
+            stitched = stitched.replace("\n\n\n", "\n\n")
+        return stitched.strip()
 
     def _load_checkpoint(self, checkpoint_key: str, source_signature: str) -> dict | None:
         path = self._checkpoint_path(checkpoint_key)
@@ -334,46 +490,28 @@ class UniversalGPT(GPT):
 
     def polish_transcript(self, source: GPTSource) -> str:
         source.segment = self.ensure_segments_type(source.segment)
-
-        def message_builder(segments, _image_urls=None, **kwargs):
-            return self._build_polished_transcript_messages(segments, **kwargs)
-
-        chunker = RequestChunker(message_builder, self.max_request_bytes, self._estimate_messages_bytes)
-        chunks = chunker.chunk(
+        chunks = self._split_polished_transcript_segments(
             source.segment,
-            [],
             title=source.title,
             tags=source.tags,
         )
 
-        partials = []
-        for chunk in chunks:
-            messages = self._build_polished_transcript_messages(
-                chunk.segments,
-                title=source.title,
-                tags=source.tags,
-            )
-            response = self._chat_completion_create(messages)
-            partials.append(response.choices[0].message.content.strip())
+        partials = [""] * len(chunks)
+        max_workers = min(self._polished_transcript_max_workers(), max(1, len(chunks)))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._polish_transcript_chunk, chunk, source.title, source.tags): idx
+                for idx, chunk in enumerate(chunks)
+            }
+            for future in as_completed(futures):
+                partials[futures[future]] = future.result()
 
         partials = [part for part in partials if part]
         if len(partials) <= 1:
-            return partials[0] if partials else ""
+            result = partials[0] if partials else ""
+            if result and self._needs_polished_transcript_repair(source.segment, result):
+                return self._repair_polished_transcript(source, result)
+            return result
 
-        def build_messages(texts, *_args, **_kwargs):
-            return self._build_polished_transcript_merge_messages(texts)
-
-        merge_chunker = RequestChunker(
-            lambda *_args, **_kwargs: [],
-            self.max_request_bytes,
-            self._estimate_messages_bytes
-        )
-        current_partials = partials
-        while len(current_partials) > 1:
-            groups = merge_chunker.group_texts_by_budget(current_partials, build_messages)
-            current_partials = [
-                self._chat_completion_create(build_messages(group)).choices[0].message.content.strip()
-                for group in groups
-            ]
-
-        return current_partials[0].strip()
+        result = self._stitch_polished_transcript_partials(partials)
+        return result
