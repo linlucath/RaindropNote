@@ -13,14 +13,12 @@ export const HomePage: FC = () => {
 
   const [status, setStatus] = useState<ViewStatus>('idle')
 
-  const content = currentTask?.markdown || ''
-
   useEffect(() => {
     if (!currentTask) {
       setStatus('idle')
     } else if (currentTask.status === 'SUCCESS') {
       setStatus('success')
-    } else if (currentTask.status === 'FAILED') {
+    } else if (currentTask.status === 'FAILED' || currentTask.status === 'CANCELLED') {
       setStatus('failed')
     } else {
       // PENDING、PARSING、DOWNLOADING、TRANSCRIBING、SUMMARIZING 等所有进行中状态

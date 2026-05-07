@@ -10,7 +10,10 @@ class TestNoteGeneratorTranscriberConfig(unittest.TestCase):
         generator.transcriber_type = "fast-whisper"
         generator.model_size = "tiny"
 
-        with patch("app.services.note.get_transcriber", return_value=object()) as get_transcriber:
+        with (
+            patch("app.services.note._get_transcriber_registry", return_value={"fast-whisper": None}),
+            patch("app.services.note._get_configured_transcriber", return_value=object()) as get_transcriber,
+        ):
             generator._init_transcriber()
 
         get_transcriber.assert_called_once_with(

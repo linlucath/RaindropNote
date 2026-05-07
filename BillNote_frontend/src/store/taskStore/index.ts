@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { delete_task, generateNote, GenerationMode } from '@/services/note.ts'
+import { delete_task, generateNote, GenerationMode, RuntimeTaskStatus } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 
 
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'FAILD'
+export type TaskStatus = RuntimeTaskStatus | 'RUNNING' | 'FAILD'
 
 export interface AudioMeta {
   cover_url: string
@@ -58,11 +58,13 @@ export interface Task {
     extras?: string
     format?: string[]
     mode?: GenerationMode
+    polish_transcript?: boolean
     batch_limit?: number
     skip_existing?: boolean
     video_understanding?: boolean
     video_interval?: number
     grid_size?: number[]
+    allow_audio_transcription?: boolean
   }
 }
 
@@ -180,8 +182,13 @@ export const useTaskStore = create<TaskStore>()(
         if (!task) return
 
         const newFormData = payload || task.formData
+        const requestMode =
+          newFormData.mode === 'transcript' && newFormData.polish_transcript
+            ? 'polished_transcript'
+            : newFormData.mode
         await generateNote({
           ...newFormData,
+          mode: requestMode,
           task_id: id,
         })
 
@@ -212,11 +219,9 @@ export const useTaskStore = create<TaskStore>()(
                 rawInfo.url ||
                 ''
               const markdown = String(result.markdown || '')
-              const mode: GenerationMode = markdown.includes('## 校对文字稿')
-                ? 'polished_transcript'
-                : markdown.includes('## 简体中文文字稿')
-                  ? 'transcript'
-                  : 'note'
+              const isPolishedTranscript = markdown.includes('## 校对文字稿')
+              const isTranscript = isPolishedTranscript || markdown.includes('## 简体中文文字稿')
+              const mode: GenerationMode = isTranscript ? 'transcript' : 'note'
 
               if (!item?.task_id || !result.markdown) return null
 
@@ -254,6 +259,7 @@ export const useTaskStore = create<TaskStore>()(
                   provider_id: '',
                   style: result.style || '',
                   mode,
+                  polish_transcript: isPolishedTranscript,
                 },
               } as Task
             })
@@ -274,10 +280,14 @@ export const useTaskStore = create<TaskStore>()(
             }
           })
           const tasks = [...restoredById.values(), ...mergedExisting]
+          const nextCurrentTaskId =
+            state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
+              ? state.currentTaskId
+              : null
 
           return {
             tasks,
-            currentTaskId: state.currentTaskId || tasks[0]?.id || null,
+            currentTaskId: nextCurrentTaskId,
           }
         }),
 

@@ -15,6 +15,8 @@ from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.services.note import NoteGenerator, logger
+from app.services.progress_query import build_progress_overview
+from app.services.progress_state import read_task_status, request_task_cancel
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
 from app.utils.url_parser import extract_video_id
@@ -35,6 +37,10 @@ class RecordRequest(BaseModel):
     platform: str
 
 
+class CancelTaskRequest(BaseModel):
+    task_id: str
+
+
 class VideoRequest(BaseModel):
     video_url: str
     platform: str
@@ -51,6 +57,7 @@ class VideoRequest(BaseModel):
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
     mode: Optional[str] = "note"
+    allow_audio_transcription: Optional[bool] = False
 
     @field_validator("video_url")
     def validate_supported_url(cls, v):
@@ -129,7 +136,7 @@ def save_note_to_file(task_id: str, note):
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[], mode: str = "note"
+                  video_interval=0, grid_size=[], mode: str = "note", allow_audio_transcription: bool = False
                   ):
 
     if mode in {"note", "polished_transcript"} and (not model_name or not provider_id):
@@ -152,6 +159,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_interval=video_interval,
             grid_size=grid_size,
             mode=mode,
+            allow_audio_transcription=allow_audio_transcription,
         )
 
     logger.info(f"任务进入执行队列 (task_id={task_id})")
@@ -214,12 +222,12 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             task_id = str(uuid.uuid4())
 
         # 统一先写入 PENDING，表示已进入队列等待串行执行
-        NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
+        NoteGenerator._update_status(task_id, TaskStatus.PENDING)
 
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                   data.extras, data.video_understanding, data.video_interval, data.grid_size,
-                                  data.mode or "note")
+                                  data.mode or "note", data.allow_audio_transcription or False)
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -227,14 +235,11 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 
 @router.get("/task_status/{task_id}")
 def get_task_status(task_id: str):
-    status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
     result_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json")
 
     # 优先读状态文件
-    if os.path.exists(status_path):
-        with open(status_path, "r", encoding="utf-8") as f:
-            status_content = json.load(f)
-
+    status_content = read_task_status(task_id=task_id, output_dir=Path(NOTE_OUTPUT_DIR))
+    if status_content:
         status = status_content.get("status")
         message = status_content.get("message", "")
 
@@ -260,7 +265,6 @@ def get_task_status(task_id: str):
         if status == TaskStatus.FAILED.value:
             return R.error(message or "任务失败", code=500)
 
-        # 处理中状态
         return R.success({
             "status": status,
             "message": message,
@@ -285,9 +289,27 @@ def get_task_status(task_id: str):
     })
 
 
+@router.post('/cancel_task')
+def cancel_task_endpoint(data: CancelTaskRequest):
+    payload = request_task_cancel(task_id=data.task_id, output_dir=Path(NOTE_OUTPUT_DIR))
+    if not payload:
+        return R.error(msg='任务不存在', code=404)
+
+    return R.success({
+        'task_id': data.task_id,
+        'status': payload.get('status', TaskStatus.CANCELLING.value),
+        'message': payload.get('message', ''),
+    })
+
+
 @router.get("/task_list")
 def get_task_list():
     return R.success({"tasks": list_saved_tasks()})
+
+
+@router.get("/progress/overview")
+def get_progress_overview():
+    return R.success(build_progress_overview())
 
 
 @router.get("/image_proxy")

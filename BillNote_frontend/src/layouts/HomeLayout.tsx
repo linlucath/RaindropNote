@@ -1,5 +1,11 @@
 import React, { FC, useRef, useState } from 'react'
-import { SlidersHorizontal, PanelLeftClose, PanelLeftOpen, History as HistoryIcon } from 'lucide-react'
+import {
+  SlidersHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
+  History as HistoryIcon,
+  Activity,
+} from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -9,7 +15,7 @@ import {
 
 import { Link } from 'react-router-dom'
 import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable'
-import { ScrollArea } from "@/components/ui/scroll-area.tsx"
+import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import type { ImperativePanelHandle } from 'react-resizable-panels'
 import logo from '@/assets/icon.svg'
 
@@ -32,9 +38,9 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
         {/* 左边表单 */}
         <ResizablePanel
           ref={leftPanelRef}
-          defaultSize={23}
-          minSize={10}
-          maxSize={35}
+          defaultSize={30}
+          minSize={20}
+          maxSize={44}
           collapsible
           collapsedSize={0}
           onCollapse={() => setIsLeftCollapsed(true)}
@@ -49,6 +55,20 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
                 <div className="text-2xl font-bold text-gray-800">BiliNote</div>
               </div>
               <div className="flex items-center gap-1">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link to={'/progress'}>
+                        <button className="text-muted-foreground hover:text-primary cursor-pointer rounded p-1 hover:bg-neutral-100">
+                          <Activity className="h-5 w-5" />
+                        </button>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <span>任务进度</span>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -79,7 +99,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
               </div>
             </header>
             <ScrollArea className="flex-1 overflow-auto">
-              <div className="p-4">{NoteForm}</div>
+              <div className="px-5 py-4">{NoteForm}</div>
             </ScrollArea>
           </aside>
         </ResizablePanel>
@@ -95,7 +115,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
                   onClick={() => leftPanelRef.current?.expand()}
                   className="flex h-full w-8 shrink-0 items-center justify-center border-r border-neutral-200 bg-white hover:bg-neutral-50"
                 >
-                  <PanelLeftOpen className="h-4 w-4 text-muted-foreground" />
+                  <PanelLeftOpen className="text-muted-foreground h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
@@ -108,7 +128,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
         {/* 中间历史 */}
         <ResizablePanel
           ref={middlePanelRef}
-          defaultSize={16}
+          defaultSize={14}
           minSize={10}
           maxSize={30}
           collapsible
@@ -152,7 +172,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
                   onClick={() => middlePanelRef.current?.expand()}
                   className="flex h-full w-8 shrink-0 items-center justify-center border-r border-neutral-200 bg-white hover:bg-neutral-50"
                 >
-                  <HistoryIcon className="h-4 w-4 text-muted-foreground" />
+                  <HistoryIcon className="text-muted-foreground h-4 w-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="right">
@@ -163,7 +183,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
         )}
 
         {/* 右边预览 */}
-        <ResizablePanel defaultSize={61} minSize={30}>
+        <ResizablePanel defaultSize={56} minSize={30}>
           <main className="flex h-full flex-col overflow-hidden bg-white p-6">{Preview}</main>
         </ResizablePanel>
       </ResizablePanelGroup>

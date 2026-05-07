@@ -7,14 +7,24 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
-import { useEffect,useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { FieldErrors, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus } from 'lucide-react'
+import { Info, Loader2, Plus, RefreshCw, Settings2, UploadCloud } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
-import { BatchVideo, GenerationMode, generateNote, getBatchStatus, previewBatchVideos, startBatch } from '@/services/note.ts'
+import {
+  BatchVideo,
+  TERMINAL_BATCH_STATUSES,
+  TERMINAL_TASK_STATUSES,
+  GenerationMode,
+  generateNote,
+  get_task_list,
+  getBatchStatus,
+  previewBatchVideos,
+  startBatch,
+} from '@/services/note.ts'
 import { uploadFile } from '@/services/upload.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
@@ -25,8 +35,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx'
 import { Checkbox } from '@/components/ui/checkbox.tsx'
-import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { Button } from '@/components/ui/button.tsx'
+import BatchVideoPreview from '@/pages/HomePage/components/BatchVideoPreview.tsx'
 import {
   Select,
   SelectContent,
@@ -35,18 +45,20 @@ import {
   SelectValue,
 } from '@/components/ui/select.tsx'
 import { Input } from '@/components/ui/input.tsx'
+import { Switch } from '@/components/ui/switch.tsx'
 import { Textarea } from '@/components/ui/textarea.tsx'
 import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
-import { fetchModels } from '@/services/model.ts'
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 
 /* -------------------- 校验 Schema -------------------- */
 const formSchema = z
   .object({
     video_url: z.string().optional(),
     source_type: z.enum(['single', 'uploader_batch']).default('single'),
-    mode: z.enum(['note', 'polished_transcript', 'transcript']).default('note'),
-    batch_limit: z.coerce.number().min(1).max(100).default(10).optional(),
+    mode: z.enum(['note', 'transcript']).default('note'),
+    polish_transcript: z.boolean().default(false).optional(),
+    batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
     skip_existing: z.boolean().default(true).optional(),
     platform: z.string().nonempty('请选择平台'),
     quality: z.enum(['fast', 'medium', 'slow']),
@@ -62,8 +74,9 @@ const formSchema = z
       .tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)])
       .default([2, 2])
       .optional(),
+    allow_audio_transcription: z.boolean().default(false).optional(),
   })
-  .superRefine(({ video_url, platform, source_type, mode, model_name, style }, ctx) => {
+  .superRefine(({ video_url, platform, source_type, mode, model_name, style, polish_transcript }, ctx) => {
     if (source_type === 'uploader_batch') {
       if (!video_url) {
         ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
@@ -74,23 +87,20 @@ const formSchema = z
       if (!video_url) {
         ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
       }
-    }
-    else {
+    } else {
       if (!video_url) {
         ctx.addIssue({ code: 'custom', message: '视频链接不能为空', path: ['video_url'] })
-      }
-      else {
+      } else {
         try {
           const url = new URL(video_url)
-          if (!['http:', 'https:'].includes(url.protocol))
-            throw new Error()
-        }
-        catch {
+          if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+        } catch {
           ctx.addIssue({ code: 'custom', message: '请输入正确的视频链接', path: ['video_url'] })
         }
       }
     }
-    if (mode !== 'transcript') {
+    const needsModel = mode === 'note' || (mode === 'transcript' && polish_transcript)
+    if (needsModel) {
       if (!model_name) {
         ctx.addIssue({ code: 'custom', message: '请选择模型', path: ['model_name'] })
       }
@@ -104,10 +114,24 @@ const formSchema = z
 
 export type NoteFormValues = z.infer<typeof formSchema>
 
+interface BatchStatusItem {
+  video_id: string
+  status: string
+  message?: string
+  task_id?: string | null
+}
+
+interface BatchStatus {
+  status: string
+  total: number
+  completed: number
+  items?: BatchStatusItem[]
+}
+
 /* -------------------- 可复用子组件 -------------------- */
 const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
-  <div className="my-3 flex items-center justify-between">
-    <h2 className="block">{title}</h2>
+  <div className="mb-3 flex items-center justify-between gap-2">
+    <h2 className="text-sm font-semibold text-neutral-800">{title}</h2>
     {tip && (
       <TooltipProvider>
         <Tooltip>
@@ -119,6 +143,23 @@ const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
       </TooltipProvider>
     )}
   </div>
+)
+
+const WorkspaceSection = ({
+  title,
+  tip,
+  children,
+  className = '',
+}: {
+  title: string
+  tip?: string
+  children: ReactNode
+  className?: string
+}) => (
+  <section className={`rounded-md border border-neutral-200 bg-white p-4 ${className}`}>
+    <SectionHeader title={title} tip={tip} />
+    {children}
+  </section>
 )
 
 const CheckboxGroup = ({
@@ -148,13 +189,20 @@ const CheckboxGroup = ({
 
 /* -------------------- 主组件 -------------------- */
 const NoteForm = () => {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   /* ---- 全局状态 ---- */
-  const { addPendingTask, currentTaskId, setCurrentTask, getCurrentTask, retryTask } =
+  const {
+    addPendingTask,
+    currentTaskId,
+    setCurrentTask,
+    getCurrentTask,
+    retryTask,
+    syncSavedTasks,
+  } =
     useTaskStore()
-  const { loadEnabledModels, modelList, showFeatureHint, setShowFeatureHint } = useModelStore()
+  const { loadEnabledModels, modelList } = useModelStore()
 
   /* ---- 表单 ---- */
   const form = useForm<NoteFormValues>({
@@ -163,56 +211,81 @@ const NoteForm = () => {
       platform: 'bilibili',
       source_type: 'single',
       mode: 'note',
-      batch_limit: 10,
+      batch_limit: 0,
       skip_existing: true,
       quality: 'medium',
       model_name: modelList[0]?.model_name || '',
       style: 'minimal',
+      polish_transcript: false,
       video_interval: 6,
       grid_size: [2, 2],
       format: [],
+      allow_audio_transcription: false,
     },
   })
   const currentTask = getCurrentTask()
   const [previewVideos, setPreviewVideos] = useState<BatchVideo[]>([])
+  const [selectedBatchVideoIds, setSelectedBatchVideoIds] = useState<string[]>([])
   const [batchId, setBatchId] = useState<string | null>(null)
-  const [batchStatus, setBatchStatus] = useState<any>(null)
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
+  const [previewSignature, setPreviewSignature] = useState<string | null>(null)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
-  const sourceType = useWatch({ control: form.control, name: 'source_type' }) as 'single' | 'uploader_batch'
+  const sourceType = useWatch({ control: form.control, name: 'source_type' }) as
+    | 'single'
+    | 'uploader_batch'
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
   const mode = useWatch({ control: form.control, name: 'mode' }) as GenerationMode
+  const polishTranscript = useWatch({ control: form.control, name: 'polish_transcript' }) as
+    | boolean
+    | undefined
   const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
+  const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as string | undefined
+  const watchedBatchLimit = useWatch({ control: form.control, name: 'batch_limit' }) as
+    | number
+    | undefined
   const transcriptOnly = mode === 'transcript'
   const transcriptMode = mode !== 'note'
-  const usesModel = mode !== 'transcript'
+  const usesModel = mode === 'note' || !!polishTranscript
   const batchMode = sourceType === 'uploader_batch'
   const editing = currentTask && currentTask.id
+  const selectedPreviewVideos = useMemo(
+    () => previewVideos.filter(video => selectedBatchVideoIds.includes(video.video_id)),
+    [previewVideos, selectedBatchVideoIds]
+  )
+  const batchRequestSignature = useMemo(
+    () => JSON.stringify({ space_url: (watchedVideoUrl || '').trim(), limit: watchedBatchLimit ?? 0 }),
+    [watchedBatchLimit, watchedVideoUrl]
+  )
+  const previewDirty =
+    batchMode && previewVideos.length > 0 && previewSignature !== null && previewSignature !== batchRequestSignature
 
   const goModelAdd = () => {
-    navigate("/settings/model");
-  };
+    navigate('/settings/model')
+  }
   /* ---- 副作用 ---- */
   useEffect(() => {
     loadEnabledModels()
 
     return
-  }, [])
+  }, [loadEnabledModels])
   useEffect(() => {
     if (!currentTask) return
     const { formData } = currentTask
 
-    console.log('currentTask.formData.platform:', formData.platform)
-
     form.reset({
       platform: formData.platform || 'bilibili',
       source_type: formData.source_type || 'single',
-      mode: formData.mode || 'note',
+      mode: formData.mode === 'note' ? 'note' : 'transcript',
+      polish_transcript:
+        formData.polish_transcript ?? formData.mode === 'polished_transcript',
       video_url: formData.video_url || '',
       model_name: formData.model_name || modelList[0]?.model_name || '',
       style: formData.style || 'minimal',
       quality: formData.quality || 'medium',
+      batch_limit: formData.batch_limit ?? 0,
+      skip_existing: formData.skip_existing ?? true,
       extras: formData.extras || '',
       screenshot: formData.screenshot ?? false,
       link: formData.link ?? false,
@@ -220,18 +293,16 @@ const NoteForm = () => {
       video_interval: formData.video_interval ?? 6,
       grid_size: formData.grid_size ?? [2, 2],
       format: formData.format ?? [],
+      allow_audio_transcription: formData.allow_audio_transcription ?? false,
     })
-  }, [
-    // 当下面任意一个变了，就重新 reset
-    currentTaskId,
-    // modelList 用来兜底 model_name
-    modelList.length,
-    // 还要加上 formData 的各字段，或者直接 currentTask
-    currentTask?.formData,
-  ])
+    setPreviewSignature(null)
+  }, [currentTask, currentTaskId, form, modelList])
 
   /* ---- 帮助函数 ---- */
-  const isGenerating = () => !['SUCCESS', 'FAILED', undefined].includes(getCurrentTask()?.status)
+  const isGenerating = () => {
+    const status = getCurrentTask()?.status
+    return status !== undefined && !TERMINAL_TASK_STATUSES.includes(status)
+  }
   const generating = isGenerating()
   const handleFileUpload = async (file: File, cb: (url: string) => void) => {
     const formData = new FormData()
@@ -240,10 +311,9 @@ const NoteForm = () => {
     setUploadSuccess(false)
 
     try {
-  
-      const  data  = await uploadFile(formData)
-        cb(data.url)
-        setUploadSuccess(true)
+      const data = await uploadFile(formData)
+      cb(data.url)
+      setUploadSuccess(true)
     } catch (err) {
       console.error('上传失败:', err)
       // message.error('上传失败，请重试')
@@ -253,36 +323,86 @@ const NoteForm = () => {
   }
 
   const onSubmit = async (values: NoteFormValues) => {
-    console.log('Not even go here')
     const selectedModel = modelList.find(m => m.model_name === values.model_name)
+    const resolvedMode: GenerationMode =
+      values.mode === 'transcript' && values.polish_transcript ? 'polished_transcript' : values.mode
+    const selectedFormats = values.mode === 'note' ? values.format ?? [] : []
+    const wantsLink = selectedFormats.includes('link')
+    const wantsScreenshot =
+      values.mode === 'note' && values.video_understanding ? selectedFormats.includes('screenshot') : false
 
     if (values.source_type === 'uploader_batch') {
-      const videos = previewVideos.length
-        ? previewVideos
-        : (await previewBatchVideos({ space_url: values.video_url || '', limit: values.batch_limit || 10 })).videos
-      setPreviewVideos(videos)
+      if (previewDirty || previewSignature !== batchRequestSignature || previewVideos.length === 0) {
+        toast.error('UP 主链接或视频数已变更，请先重新拉取视频列表')
+        return
+      }
+
       setBatchLoading(true)
-      const data = await startBatch({
-        videos,
-        mode: values.mode,
-        quality: values.quality,
-        skip_existing: values.skip_existing ?? true,
-        concurrency: 1,
-        model_name: values.mode === 'transcript' ? undefined : values.model_name,
-        provider_id: values.mode === 'transcript' ? undefined : selectedModel?.provider_id,
-      })
-      setBatchId(data.batch_id)
-      setBatchStatus({ status: 'PENDING', total: videos.length, completed: 0, items: [] })
+      try {
+        const videos = previewVideos
+        const selectedIds = selectedBatchVideoIds
+
+        const videosToProcess = videos.filter(video => selectedIds.includes(video.video_id))
+        if (!videosToProcess.length) {
+          toast.error('请至少选择一个视频')
+          setBatchLoading(false)
+          return
+        }
+
+        const data = await startBatch({
+          videos: videosToProcess,
+          mode: resolvedMode,
+          quality: values.quality,
+          skip_existing: values.skip_existing ?? true,
+          concurrency: 1,
+          link: wantsLink,
+          screenshot: wantsScreenshot,
+          model_name: resolvedMode === 'transcript' ? undefined : values.model_name,
+          provider_id: resolvedMode === 'transcript' ? undefined : selectedModel?.provider_id,
+          format: selectedFormats,
+          style: values.mode === 'note' ? values.style : undefined,
+          extras: values.mode === 'note' ? values.extras : undefined,
+          video_understanding: values.mode === 'note' ? values.video_understanding ?? false : false,
+          video_interval:
+            values.mode === 'note' && values.video_understanding
+              ? values.video_interval ?? 6
+              : 0,
+          grid_size:
+            values.mode === 'note' && values.video_understanding ? values.grid_size ?? [2, 2] : [],
+          allow_audio_transcription: values.allow_audio_transcription ?? false,
+        })
+        setBatchId(data.batch_id)
+        setBatchStatus({
+          status: 'PENDING',
+          total: videosToProcess.length,
+          completed: 0,
+          items: videosToProcess.map(video => ({
+            video_id: video.video_id,
+            status: 'PENDING',
+            message: '',
+          })),
+        })
+      } catch (error) {
+        setBatchLoading(false)
+        throw error
+      }
       return
     }
 
-    const payload: NoteFormValues = {
+    const payload = {
       ...values,
-      provider_id: values.mode === 'transcript' ? undefined : selectedModel?.provider_id,
+      mode: resolvedMode === 'polished_transcript' ? 'transcript' : values.mode,
+      provider_id: resolvedMode === 'transcript' ? undefined : selectedModel?.provider_id,
       task_id: currentTaskId || '',
-      screenshot: transcriptMode ? false : values.screenshot,
+      link: transcriptMode ? false : wantsLink,
+      screenshot: transcriptMode ? false : wantsScreenshot,
       video_understanding: transcriptMode ? false : values.video_understanding,
-      format: transcriptMode ? [] : values.format,
+      format: transcriptMode ? [] : selectedFormats,
+      allow_audio_transcription: values.allow_audio_transcription ?? false,
+    }
+    const requestPayload = {
+      ...payload,
+      mode: resolvedMode,
     }
     if (currentTaskId) {
       retryTask(currentTaskId, payload)
@@ -290,7 +410,7 @@ const NoteForm = () => {
     }
 
     // message.success('已提交任务')
-    const  data  = await generateNote(payload)
+    const data = await generateNote(requestPayload)
     addPendingTask(data.task_id, values.platform, payload)
   }
   const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
@@ -298,28 +418,64 @@ const NoteForm = () => {
     // message.error('请完善所有必填项后再提交')
   }
   const handleCreateNew = () => {
-    // 🔁 这里清空当前任务状态
-    // 比如调用 resetCurrentTask() 或者 navigate 到一个新页面
+    form.reset({
+      platform: 'bilibili',
+      source_type: 'single',
+      mode: 'note',
+      video_url: '',
+      batch_limit: 0,
+      skip_existing: true,
+      quality: 'medium',
+      model_name: modelList[0]?.model_name || '',
+      style: 'minimal',
+      polish_transcript: false,
+      video_interval: 6,
+      grid_size: [2, 2],
+      format: [],
+      allow_audio_transcription: false,
+    })
+    setPreviewVideos([])
+    setSelectedBatchVideoIds([])
+    setBatchId(null)
+    setBatchStatus(null)
+    setPreviewSignature(null)
     setCurrentTask(null)
   }
   const FormButton = () => {
-    const batchRunning = batchStatus && !['SUCCESS', 'FAILED'].includes(batchStatus.status)
-    const baseLabel = batchMode ? '开始批量处理' : transcriptOnly ? '生成文字稿' : mode === 'polished_transcript' ? '校对文字稿' : '生成笔记'
-    const label = generating || batchRunning ? '正在生成…' : editing ? '重新生成' : baseLabel
+    const batchRunning = batchStatus && !TERMINAL_BATCH_STATUSES.includes(batchStatus.status)
+    const baseLabel = batchMode
+      ? '开始批量处理'
+      : transcriptOnly
+        ? polishTranscript
+          ? '校对文字稿'
+          : '生成文字稿'
+        : '生成笔记'
+    const selectedLabel =
+      batchMode && selectedPreviewVideos.length
+        ? `${baseLabel}（${selectedPreviewVideos.length}）`
+        : baseLabel
+    const label =
+      generating || batchRunning
+        ? '正在生成…'
+        : batchMode && previewDirty
+          ? '请先重新拉取'
+          : editing
+            ? '重新生成'
+            : selectedLabel
 
     return (
       <div className="flex gap-2">
         <Button
           type="submit"
-          className={!editing ? 'w-full' : 'w-2/3' + ' bg-primary'}
-          disabled={generating || batchRunning}
+          className={editing ? 'h-11 flex-1' : 'h-11 w-full'}
+          disabled={generating || batchRunning || (batchMode && previewDirty)}
         >
           {(generating || batchRunning) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {label}
         </Button>
 
         {editing && (
-          <Button type="button" variant="outline" className="w-1/3" onClick={handleCreateNew}>
+          <Button type="button" variant="outline" className="h-11 w-32" onClick={handleCreateNew}>
             <Plus className="mr-2 h-4 w-4" />
             新建笔记
           </Button>
@@ -329,16 +485,54 @@ const NoteForm = () => {
   }
 
   const handlePreviewBatch = async () => {
+    const valid = await form.trigger(['video_url', 'batch_limit'])
+    if (!valid) {
+      toast.error('请先填写有效的 UP 主主页链接')
+      return
+    }
+
     const values = form.getValues()
     setBatchLoading(true)
     try {
       const data = await previewBatchVideos({
         space_url: values.video_url || '',
-        limit: values.batch_limit || 10,
+        limit: values.batch_limit ?? 0,
       })
-      setPreviewVideos(data.videos || [])
+      const videos = data.videos || []
+      setPreviewVideos(videos)
+      setSelectedBatchVideoIds(videos.map(video => video.video_id))
+      setPreviewSignature(
+        JSON.stringify({
+          space_url: (values.video_url || '').trim(),
+          limit: values.batch_limit ?? 0,
+        })
+      )
+      setBatchId(null)
+      setBatchStatus(null)
+      if (!videos.length) {
+        toast.error('没有找到可预览的视频')
+      }
     } finally {
       setBatchLoading(false)
+    }
+  }
+
+  const setPreviewVideoSelected = (videoId: string, checked: boolean) => {
+    setSelectedBatchVideoIds(current =>
+      checked
+        ? Array.from(new Set([...current, videoId]))
+        : current.filter(currentVideoId => currentVideoId !== videoId)
+    )
+  }
+
+  const openBatchTask = async (taskId: string) => {
+    try {
+      const res = await get_task_list()
+      syncSavedTasks(res?.tasks || [])
+      setCurrentTask(taskId)
+    } catch (error) {
+      console.warn('同步批量任务历史失败', error)
+      toast.error('结果已生成，但同步历史失败，请稍后重试')
     }
   }
 
@@ -346,441 +540,596 @@ const NoteForm = () => {
     if (!batchId) return
     const timer = setInterval(async () => {
       const data = await getBatchStatus(batchId)
-      setBatchStatus(data)
-      if (['SUCCESS', 'FAILED'].includes(data.status)) {
+      setBatchStatus(prev => {
+        const next = data as BatchStatus
+        const becameTerminal =
+          prev &&
+          !TERMINAL_BATCH_STATUSES.includes(prev.status as (typeof TERMINAL_BATCH_STATUSES)[number]) &&
+          TERMINAL_BATCH_STATUSES.includes(next.status as (typeof TERMINAL_BATCH_STATUSES)[number])
+
+        if (becameTerminal) {
+          get_task_list()
+            .then(res => syncSavedTasks(res?.tasks || []))
+            .catch(error => console.warn('同步批量历史失败', error))
+        }
+        return next
+      })
+      if (TERMINAL_BATCH_STATUSES.includes(data.status as (typeof TERMINAL_BATCH_STATUSES)[number])) {
         setBatchLoading(false)
         clearInterval(timer)
       }
     }, 3000)
     return () => clearInterval(timer)
-  }, [batchId])
+  }, [batchId, syncSavedTasks])
 
   /* -------------------- 渲染 -------------------- */
   return (
     <div className="h-full w-full">
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-4">
-          {/* 顶部按钮 */}
-          <FormButton></FormButton>
-
-          <FormField
-            control={form.control}
-            name="source_type"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="处理范围" tip="单视频处理一个链接，UP 主批量会先预览最近投稿" />
-                <Select
-                  disabled={!!editing}
-                  value={field.value}
-                  onValueChange={value => {
-                    field.onChange(value)
-                    if (value === 'uploader_batch') {
-                      form.setValue('platform', 'bilibili')
-                      form.setValue('mode', 'transcript')
-                      setPreviewVideos([])
-                      setBatchStatus(null)
-                    }
-                  }}
-                  defaultValue={field.value}
-                >
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="single">单视频</SelectItem>
-                    <SelectItem value="uploader_batch">UP 主批量</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="mode"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="生成类型" tip="校对文字稿会用大模型修正断句和分段；仅转写不消耗大模型 token" />
-                <Select
-                  disabled={!!editing}
-                  value={field.value}
-                  onValueChange={field.onChange}
-                  defaultValue={field.value}
-                >
-                  <FormControl>
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="note">AI 笔记</SelectItem>
-                    <SelectItem value="polished_transcript">校对文字稿</SelectItem>
-                    <SelectItem value="transcript">仅转写</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          {/* 视频链接 & 平台 */}
-          <SectionHeader
-            title={batchMode ? 'UP 主主页' : '视频链接'}
-            tip={batchMode ? '例如 https://space.bilibili.com/16385920/upload/video' : '支持 B 站、YouTube 等平台'}
-          />
-          <div className="flex gap-2">
-            {/* 平台选择 */}
-
-            {!batchMode && (
+        <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-4 pb-4">
+          <WorkspaceSection title="任务">
+            <div className="space-y-3">
               <FormField
                 control={form.control}
-                name="platform"
+                name="source_type"
                 render={({ field }) => (
                   <FormItem>
-                    <Select
-                      disabled={!!editing}
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      defaultValue={field.value}
-                    >
-                      <FormControl>
-                        <SelectTrigger className="w-32">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {videoPlatforms?.map(p => (
-                          <SelectItem key={p.value} value={p.value}>
-                            <div className="flex items-center justify-center gap-2">
-                              <div className="h-4 w-4">{p.logo()}</div>
-                              <span>{p.label}</span>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage style={{ display: 'none' }} />
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'single', label: '单视频' },
+                        { value: 'uploader_batch', label: 'UP 主批量' },
+                      ].map(option => {
+                        const active = field.value === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={`h-10 rounded-md border px-3 text-sm font-medium transition-colors ${
+                              active
+                                ? 'border-primary bg-primary text-white'
+                                : 'border-neutral-200 bg-neutral-50 text-neutral-700 hover:border-neutral-300 hover:bg-white'
+                            }`}
+                            onClick={() => {
+                              if (editing) {
+                                setCurrentTask(null)
+                              }
+                              field.onChange(option.value)
+                              form.setValue('polish_transcript', false)
+                              form.setValue('video_url', '')
+                              if (option.value === 'uploader_batch') {
+                                form.setValue('platform', 'bilibili')
+                                form.setValue('mode', 'transcript')
+                              }
+                              setPreviewVideos([])
+                              setSelectedBatchVideoIds([])
+                              setPreviewSignature(null)
+                              setBatchStatus(null)
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
-            )}
-            {/* 链接输入 / 上传框 */}
-            <FormField
-              control={form.control}
-              name="video_url"
-              render={({ field }) => (
-                <FormItem className="flex-1">
-                  {batchMode ? (
-                    <Input disabled={!!editing} placeholder="请输入 UP 主主页链接" {...field} />
-                  ) : platform === 'local' ? (
-                    <>
-                      <Input disabled={!!editing} placeholder="请输入本地视频路径" {...field} />
-                    </>
-                  ) : (
-                    <Input disabled={!!editing} placeholder="请输入视频网站链接" {...field} />
-                  )}
-                  <FormMessage style={{ display: 'none' }} />
-                </FormItem>
-              )}
-            />
-          </div>
 
-          <FormField
-            control={form.control}
-            name="video_url"
-            render={({ field }) => (
-              <FormItem className="flex-1">
-                {!batchMode && platform === 'local' && (
-                  <>
-                    <div
-                      className="hover:border-primary mt-2 flex h-40 cursor-pointer items-center justify-center rounded-md border-2 border-dashed border-gray-300 transition-colors"
-                      onDragOver={e => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                      }}
-                      onDrop={e => {
-                        e.preventDefault()
-                        const file = e.dataTransfer.files?.[0]
-                        if (file) handleFileUpload(file, field.onChange)
-                      }}
-                      onClick={() => {
-                        const input = document.createElement('input')
-                        input.type = 'file'
-                        input.accept = 'video/*'
-                        input.onchange = e => {
-                          const file = (e.target as HTMLInputElement).files?.[0]
-                          if (file) handleFileUpload(file, field.onChange)
-                        }
-                        input.click()
-                      }}
-                    >
-                      {isUploading ? (
-                        <p className="text-center text-sm text-blue-500">上传中，请稍候…</p>
-                      ) : uploadSuccess ? (
-                        <p className="text-center text-sm text-green-500">上传成功！</p>
-                      ) : (
-                        <p className="text-center text-sm text-gray-500">
-                          拖拽文件到这里上传 <br />
-                          <span className="text-xs text-gray-400">或点击选择文件</span>
-                        </p>
-                      )}
+              <FormField
+                control={form.control}
+                name="mode"
+                render={({ field }) => (
+                  <FormItem>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { value: 'note', label: '笔记' },
+                        { value: 'transcript', label: '文字稿' },
+                      ].map(option => {
+                        const active = field.value === option.value
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={`h-9 rounded-md border px-2 text-sm transition-colors ${
+                              active
+                                ? 'border-neutral-800 bg-neutral-900 text-white'
+                                : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50'
+                            }`}
+                            onClick={() => {
+                              if (editing) {
+                                setCurrentTask(null)
+                              }
+                              field.onChange(option.value)
+                              if (option.value === 'note') {
+                                form.setValue('polish_transcript', false)
+                              }
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
                     </div>
-                  </>
+                    <FormMessage />
+                  </FormItem>
                 )}
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          {batchMode && (
-            <div className="rounded-md border border-neutral-200 p-3">
-              <div className="grid grid-cols-2 gap-3">
+              />
+            </div>
+          </WorkspaceSection>
+
+          <WorkspaceSection title={batchMode ? '1. 粘贴主页' : '视频来源'}>
+            <div className="space-y-3">
+              <div
+                className={batchMode ? 'grid grid-cols-[minmax(0,1fr)_auto] gap-2' : 'flex gap-2'}
+              >
+                {!batchMode && (
+                  <FormField
+                    control={form.control}
+                    name="platform"
+                    render={({ field }) => (
+                      <FormItem>
+                        <Select
+                          value={field.value}
+                          onValueChange={value => {
+                            if (editing) {
+                              setCurrentTask(null)
+                            }
+                            field.onChange(value)
+                          }}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-32">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {videoPlatforms?.map(p => (
+                              <SelectItem key={p.value} value={p.value}>
+                                <div className="flex items-center justify-center gap-2">
+                                  <div className="h-4 w-4">{p.logo()}</div>
+                                  <span>{p.label}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage style={{ display: 'none' }} />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
-                  name="batch_limit"
+                  name="video_url"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>最近视频数</FormLabel>
-                      <Input type="number" min={1} max={100} {...field} />
+                    <FormItem className="min-w-0 flex-1">
+                      <Input
+                        placeholder={
+                          batchMode
+                            ? 'https://space.bilibili.com/123456'
+                            : platform === 'local'
+                              ? '请输入本地视频路径'
+                              : '请输入视频网站链接'
+                        }
+                        {...field}
+                        onChange={event => {
+                          if (editing) {
+                            setCurrentTask(null)
+                          }
+                          field.onChange(event)
+                        }}
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                {batchMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 px-3"
+                    disabled={batchLoading}
+                    onClick={handlePreviewBatch}
+                  >
+                    {batchLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    拉取
+                  </Button>
+                )}
+              </div>
+
+              {batchMode && (
+                <div className="rounded-md bg-neutral-50 px-3 py-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+                    <FormField
+                      control={form.control}
+                      name="batch_limit"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs text-neutral-500">最多视频数</FormLabel>
+                          <Input className="h-8" type="number" min={0} max={500} {...field} />
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="skip_existing"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs text-neutral-500">跳过已处理</FormLabel>
+                          <div className="flex h-8 items-center justify-end">
+                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <FormField
+                control={form.control}
+                name="video_url"
+                render={({ field }) => (
+                  <FormItem className="flex-1">
+                    {!batchMode && platform === 'local' && (
+                      <div
+                        className="hover:border-primary flex h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50 text-center transition-colors"
+                        onDragOver={e => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                        }}
+                        onDrop={e => {
+                          e.preventDefault()
+                          const file = e.dataTransfer.files?.[0]
+                          if (file) handleFileUpload(file, field.onChange)
+                        }}
+                        onClick={() => {
+                          const input = document.createElement('input')
+                          input.type = 'file'
+                          input.accept = 'video/*'
+                          input.onchange = e => {
+                            const file = (e.target as HTMLInputElement).files?.[0]
+                            if (file) handleFileUpload(file, field.onChange)
+                          }
+                          input.click()
+                        }}
+                      >
+                        <UploadCloud className="mb-2 h-5 w-5 text-neutral-400" />
+                        {isUploading ? (
+                          <p className="text-sm text-blue-500">上传中，请稍候…</p>
+                        ) : uploadSuccess ? (
+                          <p className="text-sm text-green-600">上传成功</p>
+                        ) : (
+                          <p className="text-sm text-neutral-500">
+                            拖拽文件到这里上传
+                            <span className="mt-1 block text-xs text-neutral-400">
+                              或点击选择文件
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </WorkspaceSection>
+
+          {batchMode && (
+          <WorkspaceSection title="2. 选择视频" tip="标题是主要信息，勾选后再开始批量处理">
+            <div className="space-y-3">
+                <BatchVideoPreview
+                  videos={previewVideos}
+                  selectedVideoIds={selectedBatchVideoIds}
+                  statusItems={batchStatus?.items || []}
+                  loading={batchLoading}
+                  showPreviewButton={false}
+                  emptyMessage="粘贴 UP 主主页后拉取视频标题"
+                  stale={previewDirty}
+                  staleMessage="你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。"
+                  onPreview={handlePreviewBatch}
+                  onSelectAll={() =>
+                    setSelectedBatchVideoIds(previewVideos.map(video => video.video_id))
+                  }
+                  onClear={() => setSelectedBatchVideoIds([])}
+                  onToggleVideo={setPreviewVideoSelected}
+                  onOpenTask={openBatchTask}
+                />
+
+                {selectedPreviewVideos.length === 0 && previewVideos.length > 0 && (
+                  <div className="text-xs text-red-500">请选择至少一个视频再开始批量处理</div>
+                )}
+
+                {previewVideos.length > 0 && !previewDirty && (
+                  <div className="text-xs text-neutral-500">
+                    当前列表已锁定到这次拉取结果。修改链接或视频数后，需要重新拉取才能提交。
+                  </div>
+                )}
+
+                {batchStatus && (
+                  <div className="rounded-md bg-neutral-50 p-3 text-xs text-neutral-700">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span>批量状态：{batchStatus.status}</span>
+                      <span>
+                        {batchStatus.completed || 0}/{batchStatus.total || 0}
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-neutral-200">
+                      <div
+                        className="bg-primary h-full rounded-full transition-all"
+                        style={{
+                          width: `${
+                            batchStatus.total
+                              ? Math.round(((batchStatus.completed || 0) / batchStatus.total) * 100)
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
+                    {!!batchStatus.items?.some(
+                      item =>
+                        item.task_id &&
+                        (item.status === 'SUCCESS' || item.status === 'SKIPPED')
+                    ) && (
+                      <div className="mt-2 text-[11px] text-neutral-500">
+                        成功项已同步到历史区，也可以在列表里直接点“查看”。
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </WorkspaceSection>
+          )}
+
+          <WorkspaceSection title={batchMode ? '3. 生成设置' : '生成设置'}>
+            <div className="space-y-3">
+              {usesModel &&
+                (modelList.length > 0 ? (
+                  <FormField
+                    control={form.control}
+                    name="model_name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>模型</FormLabel>
+                        <Select
+                          onOpenChange={() => {
+                            loadEnabledModels()
+                          }}
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full min-w-0 truncate">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {modelList.map(m => (
+                              <SelectItem key={m.id} value={m.model_name}>
+                                {m.model_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                ) : (
+                  <Button type="button" variant="outline" className="w-full" onClick={goModelAdd}>
+                    请先添加模型
+                  </Button>
+                ))}
+
+              {transcriptOnly && (
                 <FormField
                   control={form.control}
-                  name="skip_existing"
+                  name="polish_transcript"
                   render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>跳过已处理</FormLabel>
-                      <div className="flex h-10 items-center gap-2">
-                        <Checkbox checked={!!field.value} onCheckedChange={field.onChange} />
-                        <span className="text-sm text-neutral-600">开启</span>
+                    <FormItem className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <FormLabel>是否校对</FormLabel>
+                          <div className="text-xs text-neutral-500">
+                            关闭时快速生成文字稿，开启时调用模型输出校对稿
+                          </div>
+                        </div>
+                        <FormControl>
+                          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                        </FormControl>
                       </div>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-3 w-full"
-                disabled={batchLoading}
-                onClick={handlePreviewBatch}
-              >
-                {batchLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                预览视频列表
-              </Button>
-              {previewVideos.length > 0 && (
-                <div className="mt-3 max-h-40 overflow-y-auto rounded border border-neutral-100 bg-neutral-50 p-2 text-xs">
-                  {previewVideos.map((video, index) => (
-                    <div key={video.video_id} className="flex items-center gap-2 py-1">
-                      <span className="w-6 text-neutral-400">{index + 1}</span>
-                      <span className="font-mono">{video.video_id}</span>
-                      <span className="truncate text-neutral-600">{video.title || video.video_url}</span>
-                    </div>
-                  ))}
-                </div>
               )}
-              {batchStatus && (
-                <div className="mt-3 rounded bg-neutral-50 p-2 text-xs text-neutral-700">
-                  批量状态：{batchStatus.status}，进度：{batchStatus.completed || 0}/{batchStatus.total || 0}
-                  {batchStatus.items?.slice(0, 5).map(item => (
-                    <div key={item.video_id} className="mt-1 flex gap-2">
-                      <span className="font-mono">{item.video_id}</span>
-                      <span>{item.status}</span>
-                      {item.message && <span className="truncate text-neutral-500">{item.message}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            {/* 模型选择 */}
-            {
 
-             modelList.length>0?(     <FormField
-               className="w-full"
-               control={form.control}
-               name="model_name"
-               render={({ field }) => (
-                 <FormItem>
-                   <SectionHeader title="模型选择" tip="不同模型效果不同，建议自行测试" />
-                   <Select
-                     disabled={!usesModel}
-                     onOpenChange={()=>{
-                       loadEnabledModels()
-                     }}
-                     value={field.value}
-                     onValueChange={field.onChange}
-                     defaultValue={field.value}
-                   >
-                     <FormControl>
-                       <SelectTrigger className="w-full min-w-0 truncate">
-                         <SelectValue />
-                       </SelectTrigger>
-                     </FormControl>
-                     <SelectContent>
-                       {modelList.map(m => (
-                         <SelectItem key={m.id} value={m.model_name}>
-                           {m.model_name}
-                         </SelectItem>
-                       ))}
-                     </SelectContent>
-                   </Select>
-                   <FormMessage />
-                 </FormItem>
-               )}
-             />): (
-               <FormItem>
-                 <SectionHeader title="模型选择" tip="不同模型效果不同，建议自行测试" />
-                  <Button type={'button'} variant={
-                    'outline'
-                  } onClick={()=>{goModelAdd()}}>请先添加模型</Button>
-                 <FormMessage />
-               </FormItem>
-             )
-            }
-
-            {/* 笔记风格 */}
-            <FormField
-              className="w-full"
-              control={form.control}
-              name="style"
-              render={({ field }) => (
-                <FormItem>
-                  <SectionHeader title="笔记风格" tip="选择生成笔记的呈现风格" />
-                  <Select
-                    disabled={transcriptMode}
-                    value={field.value}
-                    onValueChange={field.onChange}
-                    defaultValue={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger className="w-full min-w-0 truncate">
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {noteStyles.map(({ label, value }) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-          {/* 视频理解 */}
-          <SectionHeader title="视频理解" tip="将视频截图发给多模态模型辅助分析" />
-          <div className="flex flex-col gap-2">
-            <FormField
-              control={form.control}
-              name="video_understanding"
-              render={({ field }) => (
-                <FormItem>
-                  <div className="flex items-center gap-2">
-                    <FormLabel>启用</FormLabel>
-                    <Checkbox
-                      disabled={transcriptMode}
-                      checked={videoUnderstandingEnabled}
-                      onCheckedChange={v => form.setValue('video_understanding', transcriptMode ? false : v)}
-                    />
-                  </div>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              {/* 采样间隔 */}
-              <FormField
-                control={form.control}
-                name="video_interval"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>采样间隔（秒）</FormLabel>
-                    <Input disabled={transcriptMode || !videoUnderstandingEnabled} type="number" {...field} />
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              {/* 拼图大小 */}
-              <FormField
-                control={form.control}
-                name="grid_size"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>拼图尺寸（列 × 行）</FormLabel>
-                    <div className="flex items-center space-x-2">
-                      <Input
-                        disabled={transcriptMode || !videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[0] || 3}
-                        onChange={e => field.onChange([+e.target.value, field.value?.[1] || 3])}
-                        className="w-16"
-                      />
-                      <span>x</span>
-                      <Input
-                        disabled={transcriptMode || !videoUnderstandingEnabled}
-                        type="number"
-                        value={field.value?.[1] || 3}
-                        onChange={e => field.onChange([field.value?.[0] || 3, +e.target.value])}
-                        className="w-16"
-                      />
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            <Alert variant="warning" className="text-sm">
-              <AlertDescription>
-                <strong>提示：</strong>视频理解功能必须使用多模态模型。
-              </AlertDescription>
-            </Alert>
-          </div>
-
-          {/* 笔记格式 */}
-          <FormField
-            control={form.control}
-            name="format"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="笔记格式" tip="选择要包含的笔记元素" />
-                <CheckboxGroup
-                  value={field.value}
-                  onChange={field.onChange}
-                  disabledMap={{
-                    link: transcriptMode || platform === 'local',
-                    screenshot: transcriptMode || !videoUnderstandingEnabled,
-                    toc: transcriptMode,
-                    summary: transcriptMode,
-                  }}
+              {mode === 'note' && (
+                <FormField
+                  control={form.control}
+                  name="style"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>笔记风格</FormLabel>
+                      <Select
+                        value={field.value}
+                        onValueChange={field.onChange}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full min-w-0 truncate">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {noteStyles.map(({ label, value }) => (
+                            <SelectItem key={value} value={value}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
                 />
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+              )}
 
-          {/* 备注 */}
-          <FormField
-            control={form.control}
-            name="extras"
-            render={({ field }) => (
-              <FormItem>
-                <SectionHeader title="备注" tip="可在 Prompt 结尾附加自定义说明" />
-                <Textarea disabled={transcriptMode} placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+              <FormField
+                control={form.control}
+                name="quality"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>处理速度</FormLabel>
+                    <Select
+                      value={field.value}
+                      onValueChange={field.onChange}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="fast">快速</SelectItem>
+                        <SelectItem value="medium">均衡</SelectItem>
+                        <SelectItem value="slow">精细</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </WorkspaceSection>
+
+          {!transcriptMode && (
+            <WorkspaceSection title="输出选项">
+              <div className="space-y-4">
+                <div className="rounded-md border border-neutral-100 bg-neutral-50 p-3">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Settings2 className="h-4 w-4 text-neutral-500" />
+                    <span className="text-sm font-medium text-neutral-700">视频理解</span>
+                  </div>
+                  <div className="space-y-3">
+                    <FormField
+                      control={form.control}
+                      name="video_understanding"
+                      render={() => (
+                        <FormItem>
+                          <div className="flex items-center justify-between">
+                            <FormLabel>启用</FormLabel>
+                            <Checkbox
+                              checked={!!videoUnderstandingEnabled}
+                              onCheckedChange={v => form.setValue('video_understanding', !!v)}
+                            />
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    {videoUnderstandingEnabled && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <FormField
+                          control={form.control}
+                          name="video_interval"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>采样间隔</FormLabel>
+                              <Input type="number" {...field} />
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name="grid_size"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>拼图尺寸</FormLabel>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  value={field.value?.[0] || 3}
+                                  onChange={e =>
+                                    field.onChange([+e.target.value, field.value?.[1] || 3])
+                                  }
+                                  className="w-16"
+                                />
+                                <span className="text-neutral-400">x</span>
+                                <Input
+                                  type="number"
+                                  value={field.value?.[1] || 3}
+                                  onChange={e =>
+                                    field.onChange([field.value?.[0] || 3, +e.target.value])
+                                  }
+                                  className="w-16"
+                                />
+                              </div>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    )}
+
+                    {videoUnderstandingEnabled && (
+                      <Alert variant="warning" className="text-sm">
+                        <AlertDescription>
+                          <strong>提示：</strong>视频理解功能必须使用多模态模型。
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </div>
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="format"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>笔记格式</FormLabel>
+                      <CheckboxGroup
+                        value={field.value}
+                        onChange={field.onChange}
+                        disabledMap={{
+                          link: platform === 'local',
+                          screenshot: !videoUnderstandingEnabled,
+                          toc: false,
+                          summary: false,
+                        }}
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="extras"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>备注</FormLabel>
+                      <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </WorkspaceSection>
+          )}
+
+          <div className="sticky bottom-0 z-10 -mx-1 bg-white/95 px-1 pt-2 pb-1 backdrop-blur">
+            <FormButton />
+          </div>
         </form>
       </Form>
     </div>
