@@ -395,16 +395,21 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   if (status === 'failed' && !isMultiVersion) {
+    const cancelled = taskStatus === 'CANCELLED'
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
         <Error />
         <div className="text-center">
-          <p className="text-lg font-bold text-red-500">笔记生成失败</p>
-          <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
+          <p className="text-lg font-bold text-red-500">{cancelled ? '任务已取消' : '笔记生成失败'}</p>
+          <p className="mt-2 mb-2 text-xs text-red-400">
+            {cancelled ? '这个任务已经停止，不会继续执行。' : '请检查后台或稍后再试'}
+          </p>
 
-          <Button onClick={() => retryTask(currentTask.id)} size="lg">
-            重试
-          </Button>
+          {!cancelled ? (
+            <Button onClick={() => retryTask(currentTask.id)} size="lg">
+              重试
+            </Button>
+          ) : null}
         </div>
       </div>
     )

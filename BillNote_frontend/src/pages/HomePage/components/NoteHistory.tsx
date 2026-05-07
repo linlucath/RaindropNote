@@ -1,10 +1,7 @@
 import { useTaskStore } from '@/store/taskStore'
-import { ScrollArea } from '@/components/ui/scroll-area.tsx'
-import { Badge } from '@/components/ui/badge.tsx'
 import { cn } from '@/lib/utils.ts'
 import { Trash } from 'lucide-react'
 import { Button } from '@/components/ui/button.tsx'
-import PinyinMatch from 'pinyin-match'
 import Fuse from 'fuse.js'
 
 import {
@@ -28,7 +25,6 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
   const syncSavedTasks = useTaskStore(state => state.syncSavedTasks)
   // 确保baseURL没有尾部斜杠
   const baseURL = (String(import.meta.env.VITE_API_BASE_URL || 'api')).replace(/\/$/, '')
-  const [rawSearch, setRawSearch] = useState('')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -41,14 +37,6 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
     keys: ['audioMeta.title'],
     threshold: 0.4 // 匹配精度（越低越严格）
   }), [tasks])
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (rawSearch === '') return
-      setSearch(rawSearch)
-    }, 300) // 300ms 防抖
-
-    return () => clearTimeout(timer)
-  }, [rawSearch])
   const filteredTasks = search.trim()
       ? fuse.search(search).map(result => result.item)
       : tasks
@@ -152,7 +140,12 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                     已完成
                   </div>
                 )}
-                {task.status !== 'SUCCESS' && task.status !== 'FAILED' ? (
+                {task.status === 'CANCELLED' && (
+                  <div className={'inline-block w-10 rounded bg-neutral-500 p-0.5 text-center text-white'}>
+                    已取消
+                  </div>
+                )}
+                {task.status !== 'SUCCESS' && task.status !== 'FAILED' && task.status !== 'CANCELLED' ? (
                   <div className={'inline-block w-10 rounded bg-green-500 p-0.5 text-center text-white'}>
                     等待中
                   </div>

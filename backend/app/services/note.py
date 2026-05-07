@@ -29,9 +29,9 @@ from app.models.model_config import ModelConfig
 from app.models.notes_model import AudioDownloadResult, NoteResult
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.constant import SUPPORT_PLATFORM_MAP
+from app.services.progress_state import cancel_task, is_task_cancel_requested, write_task_status
 from app.services.provider import ProviderService
 from app.transcriber.base import Transcriber
-from app.transcriber.transcriber_provider import get_transcriber, _transcribers
 from app.utils.note_helper import replace_content_markers, prepend_source_link
 from app.utils.screenshot_marker import extract_screenshot_timestamps
 from app.utils.status_code import StatusCode
@@ -60,11 +60,31 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+class TaskCancelledError(RuntimeError):
+    pass
+
+
+def _get_transcriber_registry():
+    from app.transcriber.transcriber_provider import _transcribers
+
+    return _transcribers
+
+
+def _get_configured_transcriber(transcriber_type: str, model_size: str):
+    from app.transcriber.transcriber_provider import get_transcriber
+
+    return get_transcriber(transcriber_type=transcriber_type, model_size=model_size)
+
+
 class NoteGenerator:
     """
     NoteGenerator 用于执行视频/音频下载、转写、GPT 生成笔记、插入截图/链接、
     以及将任务信息写入状态文件与数据库等功能。
     """
+    AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE = (
+        "未找到可用字幕文件。需要确认音频转写后，才会下载音频并进行转写。"
+    )
+    SUBTITLE_TRANSCRIPT_SOURCES = {"bilibili_subtitle", "youtube_transcript_api"}
 
     def __init__(self):
         from app.services.transcriber_config_manager import TranscriberConfigManager
@@ -98,6 +118,7 @@ class NoteGenerator:
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
         mode: str = "note",
+        allow_audio_transcription: bool = False,
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -119,6 +140,7 @@ class NoteGenerator:
         :param grid_size: 生成缩略图时的网格大小，如 [3, 3]
         :param mode: 生成模式，"note" 为 AI 笔记，"transcript" 为仅转写文字稿，
             "polished_transcript" 为大模型校对文字稿
+        :param allow_audio_transcription: 无字幕时是否允许下载音频并转写
         :return: NoteResult 对象，包含 markdown 文本、转写结果和音频元信息
         """
         if grid_size is None:
@@ -128,12 +150,14 @@ class NoteGenerator:
 
         try:
             logger.info(f"开始生成笔记 (task_id={task_id})")
-            self._update_status(task_id, TaskStatus.PARSING)
+            self._cancel_if_requested(task_id)
+            self._update_status(task_id, TaskStatus.PARSING, platform=platform)
 
             # 获取下载器与 GPT 实例
 
             downloader = self._get_downloader(platform)
-            gpt = None if is_transcript_only else self._get_gpt(model_name, provider_id)
+            self._cancel_if_requested(task_id)
+            gpt = None
 
             # 缓存文件路径
             audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
@@ -146,14 +170,12 @@ class NoteGenerator:
             if transcript_cache_file.exists():
                 logger.info(f"检测到转写缓存 ({transcript_cache_file})，尝试读取")
                 try:
-                    data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
-                    segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                    transcript = TranscriptResult(
-                        language=data.get("language"),
-                        full_text=data["full_text"],
-                        segments=segments,
+                    transcript = self._load_transcript_cache(
+                        transcript_cache_file,
+                        allow_audio_transcription=allow_audio_transcription,
                     )
-                    logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
+                    if transcript:
+                        logger.info(f"已从缓存加载转写结果，共 {len(transcript.segments)} 段")
                 except Exception as e:
                     logger.warning(f"加载转写缓存失败: {e}")
 
@@ -170,14 +192,17 @@ class NoteGenerator:
                         )
                     else:
                         transcript = None
-                        logger.info("平台无可用字幕，将下载音频后转写")
+                        logger.info("平台无可用字幕")
                 except Exception as e:
-                    logger.warning(f"获取平台字幕失败: {e}，将下载音频后转写")
+                    logger.warning(f"获取平台字幕失败: {e}")
                     transcript = None
 
             # 2. 下载音频/视频
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
+            if not has_transcript and not allow_audio_transcription:
+                raise RuntimeError(self.AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE)
+
             need_full_download = not has_transcript or screenshot or video_understanding
             audio_meta = self._download_media(
                 downloader=downloader,
@@ -193,6 +218,7 @@ class NoteGenerator:
                 grid_size=grid_size,
                 skip_download=not need_full_download,
             )
+            self._cancel_if_requested(task_id)
 
             # 3. 如果前面没拿到字幕，走转写流程
             if transcript is None:
@@ -203,37 +229,44 @@ class NoteGenerator:
                     transcript_cache_file=transcript_cache_file,
                     status_phase=TaskStatus.TRANSCRIBING,
                     task_id=task_id,
+                    allow_audio_transcription=allow_audio_transcription,
                 )
+            self._cancel_if_requested(task_id)
 
             if is_transcript_only:
                 markdown = self._build_transcript_markdown(audio_meta=audio_meta, transcript=transcript)
                 markdown_cache_file.write_text(markdown, encoding="utf-8")
                 markdown = prepend_source_link(markdown, str(video_url))
 
-                self._update_status(task_id, TaskStatus.SAVING)
+                self._cancel_if_requested(task_id)
+                self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
                 self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
 
-                self._update_status(task_id, TaskStatus.SUCCESS)
+                self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
                 logger.info(f"文字稿生成成功 (task_id={task_id})")
                 return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
 
             if is_polished_transcript:
+                gpt = self._get_gpt(model_name, provider_id)
                 markdown = self._polish_transcript(
                     audio_meta=audio_meta,
                     transcript=transcript,
                     gpt=gpt,
                     markdown_cache_file=markdown_cache_file,
                 )
+                self._cancel_if_requested(task_id)
                 markdown = prepend_source_link(markdown, str(video_url))
 
-                self._update_status(task_id, TaskStatus.SAVING)
+                self._cancel_if_requested(task_id)
+                self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
                 self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
 
-                self._update_status(task_id, TaskStatus.SUCCESS)
+                self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
                 logger.info(f"校对文字稿生成成功 (task_id={task_id})")
                 return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
 
             # 3. GPT 总结
+            gpt = self._get_gpt(model_name, provider_id)
             markdown = self._summarize_text(
                 audio_meta=audio_meta,
                 transcript=transcript,
@@ -246,6 +279,7 @@ class NoteGenerator:
                 extras=extras,
                 video_img_urls=self.video_img_urls,
             )
+            self._cancel_if_requested(task_id)
 
             # 4. 截图 & 链接替换
             if _format:
@@ -260,18 +294,50 @@ class NoteGenerator:
             markdown = prepend_source_link(markdown, str(video_url))
 
             # 5. 保存记录到数据库
-            self._update_status(task_id, TaskStatus.SAVING)
+            self._cancel_if_requested(task_id)
+            self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
             self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
 
             # 6. 完成
-            self._update_status(task_id, TaskStatus.SUCCESS)
+            self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
             logger.info(f"笔记生成成功 (task_id={task_id})")
             return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
 
+        except TaskCancelledError as exc:
+            logger.info(f"任务已取消 (task_id={task_id})：{exc}")
+            return None
         except Exception as exc:
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
-            self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
+            self._update_status(task_id, TaskStatus.FAILED, message=str(exc), platform=platform)
             return None
+
+    @staticmethod
+    def _is_subtitle_transcript_data(data: dict) -> bool:
+        raw = data.get("raw") or {}
+        return isinstance(raw, dict) and raw.get("source") in NoteGenerator.SUBTITLE_TRANSCRIPT_SOURCES
+
+    @staticmethod
+    def _is_subtitle_transcript_result(transcript: TranscriptResult) -> bool:
+        raw = transcript.raw or {}
+        return isinstance(raw, dict) and raw.get("source") in NoteGenerator.SUBTITLE_TRANSCRIPT_SOURCES
+
+    @staticmethod
+    def _load_transcript_cache(
+        transcript_cache_file: Path,
+        allow_audio_transcription: bool = False,
+    ) -> Optional[TranscriptResult]:
+        data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
+        if not allow_audio_transcription and not NoteGenerator._is_subtitle_transcript_data(data):
+            logger.info(f"转写缓存不是字幕来源，等待用户确认音频转写 ({transcript_cache_file})")
+            return None
+
+        segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
+        return TranscriptResult(
+            language=data.get("language"),
+            full_text=data["full_text"],
+            segments=segments,
+            raw=data.get("raw"),
+        )
 
     @staticmethod
     def delete_note(video_id: str, platform: str) -> int:
@@ -291,12 +357,16 @@ class NoteGenerator:
         """
         根据环境变量 TRANSCRIBER_TYPE 动态获取并实例化转写器
         """
+        _transcribers = _get_transcriber_registry()
         if self.transcriber_type not in _transcribers:
             logger.error(f"未找到支持的转写器：{self.transcriber_type}")
             raise Exception(f"不支持的转写器：{self.transcriber_type}")
 
         logger.info(f"使用转写器：{self.transcriber_type}")
-        return get_transcriber(transcriber_type=self.transcriber_type, model_size=self.model_size)
+        return _get_configured_transcriber(
+            transcriber_type=self.transcriber_type,
+            model_size=self.model_size,
+        )
 
     def _get_gpt(self, model_name: Optional[str], provider_id: Optional[str]) -> GPT:
         """
@@ -436,7 +506,14 @@ class NoteGenerator:
         logger.info(f"使用下载器：{downloader_cls.__class__}")
         return instance
 
-    def _update_status(self, task_id: Optional[str], status: Union[str, TaskStatus], message: Optional[str] = None):
+    @staticmethod
+    def _update_status(
+        task_id: Optional[str],
+        status: Union[str, TaskStatus],
+        message: Optional[str] = None,
+        title: Optional[str] = None,
+        platform: Optional[str] = None,
+    ):
         """
         创建或更新 {task_id}.status.json，记录当前任务状态
 
@@ -447,33 +524,28 @@ class NoteGenerator:
         if not task_id:
             return
 
-        NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        status_file = NOTE_OUTPUT_DIR / f"{task_id}.status.json"
-        print(f"写入状态文件: {status_file} 当前状态: {status}")
-        data = {"status": status.value if isinstance(status, TaskStatus) else status}
-        if message:
-            data["message"] = message
-
         try:
-            # First create a temporary file
-            temp_file = status_file.with_suffix('.tmp')
-
-            # Write to temporary file
-            with temp_file.open('w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            # Atomic rename operation
-            temp_file.replace(status_file)
-
-            print(f"状态文件写入成功: {status_file}")
+            write_task_status(
+                task_id=task_id,
+                output_dir=NOTE_OUTPUT_DIR,
+                status=status,
+                message=message,
+                title=title,
+                platform=platform,
+            )
         except Exception as e:
             logger.error(f"写入状态文件失败 (task_id={task_id})：{e}")
-            # Try to write error to file directly as fallback
-            try:
-                with status_file.open('w', encoding='utf-8') as f:
-                    f.write(f"Error writing status: {str(e)}")
-            except:
-                logger.error(f"写入错误  {e}")
+
+    @staticmethod
+    def _cancel_if_requested(task_id: Optional[str]) -> None:
+        if not task_id:
+            return
+
+        if not is_task_cancel_requested(task_id=task_id, output_dir=NOTE_OUTPUT_DIR):
+            return
+
+        cancel_task(task_id=task_id, output_dir=NOTE_OUTPUT_DIR)
+        raise TaskCancelledError('任务已取消')
 
     def _handle_exception(self, task_id, exc):
         logger.error(f"任务异常 (task_id={task_id})", exc_info=True)
@@ -605,6 +677,7 @@ class NoteGenerator:
         transcript_cache_file: Path,
         status_phase: TaskStatus,
         task_id: Optional[str] = None,
+        allow_audio_transcription: bool = False,
     ) -> TranscriptResult | None:
         """
         优先获取平台字幕，没有则 fallback 到音频转写
@@ -615,6 +688,7 @@ class NoteGenerator:
         :param transcript_cache_file: 缓存文件路径
         :param status_phase: 状态枚举
         :param task_id: 任务 ID
+        :param allow_audio_transcription: 无字幕时是否允许音频转写
         :return: TranscriptResult 对象
         """
         self._update_status(task_id, status_phase)
@@ -623,9 +697,12 @@ class NoteGenerator:
         if transcript_cache_file.exists():
             logger.info(f"检测到转写缓存 ({transcript_cache_file})，尝试读取")
             try:
-                data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
-                segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                return TranscriptResult(language=data.get("language"), full_text=data["full_text"], segments=segments)
+                transcript = self._load_transcript_cache(
+                    transcript_cache_file,
+                    allow_audio_transcription=allow_audio_transcription,
+                )
+                if transcript:
+                    return transcript
             except Exception as e:
                 logger.warning(f"加载转写缓存失败，将重新获取：{e}")
 
@@ -642,11 +719,14 @@ class NoteGenerator:
                 )
                 return transcript
             else:
-                logger.info("平台无可用字幕，将使用音频转写")
+                logger.info("平台无可用字幕")
         except Exception as e:
-            logger.warning(f"获取平台字幕失败: {e}，将使用音频转写")
+            logger.warning(f"获取平台字幕失败: {e}")
 
         # 2. Fallback 到音频转写
+        if not allow_audio_transcription:
+            raise RuntimeError(self.AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE)
+
         return self._transcribe_audio(
             audio_file=audio_file,
             transcript_cache_file=transcript_cache_file,
@@ -685,6 +765,15 @@ class NoteGenerator:
         try:
             logger.info("开始转写音频")
             transcript = self.transcriber.transcript(file_path=audio_file)
+            if isinstance(transcript.raw, dict):
+                transcript.raw.setdefault("source", "audio_transcription")
+            elif transcript.raw is None:
+                transcript.raw = {"source": "audio_transcription"}
+            else:
+                transcript.raw = {
+                    "source": "audio_transcription",
+                    "transcriber_raw": str(transcript.raw),
+                }
             transcript_cache_file.write_text(json.dumps(asdict(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"转写并缓存成功 ({transcript_cache_file})")
             return transcript

@@ -34,6 +34,10 @@ def _install_stubs():
     prompt_mod.SCREENSHOT = ""
     prompt_mod.LINK = ""
     prompt_mod.MERGE_PROMPT = "merge"
+    prompt_mod.POLISHED_TRANSCRIPT_CHUNK_PROMPT = ""
+    prompt_mod.POLISHED_TRANSCRIPT_PROMPT = ""
+    prompt_mod.POLISHED_TRANSCRIPT_MERGE_PROMPT = ""
+    prompt_mod.POLISHED_TRANSCRIPT_REPAIR_PROMPT = ""
 
     utils_mod = types.ModuleType("app.gpt.utils")
 

@@ -2,21 +2,93 @@ import request from '@/utils/request'
 import toast from 'react-hot-toast'
 
 export type GenerationMode = 'note' | 'transcript' | 'polished_transcript'
+export type RuntimeTaskStatus =
+  | 'PENDING'
+  | 'PARSING'
+  | 'DOWNLOADING'
+  | 'TRANSCRIBING'
+  | 'SUMMARIZING'
+  | 'FORMATTING'
+  | 'SAVING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'CANCELLING'
+  | 'CANCELLED'
+export type BatchStatus = 'PENDING' | 'RUNNING' | 'CANCELLING' | 'CANCELLED' | 'SUCCESS' | 'FAILED'
+export type BatchItemStatus = RuntimeTaskStatus | 'RUNNING' | 'SKIPPED'
+
+export interface ProgressTaskItem {
+  id: string
+  task_id: string
+  title: string
+  platform: string
+  status: RuntimeTaskStatus
+  message?: string
+  created_at?: string
+  updated_at?: string
+  has_result?: boolean
+}
+
+export interface ProgressBatchItem {
+  batch_id: string
+  title: string
+  source_label?: string
+  status: BatchStatus
+  completed: number
+  total: number
+  updated_at?: string
+  created_at?: string
+  current_item_title?: string | null
+  current_item_index?: number | null
+  cancel_requested?: boolean
+  items?: Array<{
+    video_id: string
+    title: string
+    status: BatchItemStatus
+    task_id?: string | null
+    message?: string
+  }>
+}
+
+export interface ProgressOverview {
+  summary: {
+    pending: number
+    running: number
+    cancelling: number
+    success: number
+    failed: number
+    cancelled: number
+  }
+  tasks: {
+    active: ProgressTaskItem[]
+    recent_terminal: ProgressTaskItem[]
+  }
+  batches: {
+    active: ProgressBatchItem[]
+    recent_terminal: ProgressBatchItem[]
+  }
+}
+
+export const TERMINAL_TASK_STATUSES: RuntimeTaskStatus[] = ['SUCCESS', 'FAILED', 'CANCELLED']
+export const TERMINAL_BATCH_STATUSES: BatchStatus[] = ['SUCCESS', 'FAILED', 'CANCELLED']
 
 export const generateNote = async (data: {
   video_url: string
   platform: string
   quality: string
+  link?: boolean
+  screenshot?: boolean
   model_name?: string
   provider_id?: string
   task_id?: string
   format: Array<string>
   style?: string
   extras?: string
-  video_understand?: boolean
+  video_understanding?: boolean
   video_interval?: number
   grid_size: Array<number>
   mode?: GenerationMode
+  allow_audio_transcription?: boolean
 }) => {
   try {
     console.log('generateNote', data)
@@ -34,7 +106,7 @@ export const generateNote = async (data: {
     // 成功提示
 
     return response
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('❌ 请求出错', e)
 
     // 错误提示
@@ -92,8 +164,8 @@ export interface BatchVideo {
   title?: string
 }
 
-export const previewBatchVideos = async (data: { space_url: string; limit: number }) => {
-  return await request.post('/batch/preview', data)
+export const previewBatchVideos = async (data: { space_url: string; limit?: number }) => {
+  return await request.post('/batch/preview', data, { timeout: 60000 })
 }
 
 export const startBatch = async (data: {
@@ -102,12 +174,33 @@ export const startBatch = async (data: {
   quality: string
   skip_existing: boolean
   concurrency: number
+  link?: boolean
+  screenshot?: boolean
   model_name?: string
   provider_id?: string
+  format?: string[]
+  style?: string
+  extras?: string
+  video_understanding?: boolean
+  video_interval?: number
+  grid_size?: number[]
+  allow_audio_transcription?: boolean
 }) => {
   return await request.post('/batch/start', data)
 }
 
 export const getBatchStatus = async (batchId: string) => {
   return await request.get('/batch/status/' + batchId)
+}
+
+export const cancelTask = async (taskId: string) => {
+  return await request.post('/cancel_task', { task_id: taskId })
+}
+
+export const cancelBatch = async (batchId: string) => {
+  return await request.post('/batch/cancel', { batch_id: batchId })
+}
+
+export const getProgressOverview = async () => {
+  return (await request.get('/progress/overview')) as ProgressOverview
 }
