@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -22,6 +23,14 @@ class CookieConfigManager:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def get(self, platform: str) -> Optional[str]:
+        env_names = [
+            f"{platform.upper()}_COOKIE",
+            f"DOWNLOADER_{platform.upper()}_COOKIE",
+        ]
+        for env_name in env_names:
+            env_value = (os.getenv(env_name) or "").strip()
+            if env_value:
+                return env_value
         data = self._read()
         return data.get(platform, {}).get("cookie")
 

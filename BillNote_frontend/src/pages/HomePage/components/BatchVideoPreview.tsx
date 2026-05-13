@@ -1,9 +1,13 @@
-import { useMemo } from 'react'
+import { useMemo, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowUpRight, FileText, ListChecks, Loader2, RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import { Checkbox } from '@/components/ui/checkbox.tsx'
+import {
+  getUniqueBatchVideos,
+  shouldToggleVideoItemFromKeydown,
+} from '@/pages/HomePage/components/batchVideoSelection.ts'
 import type { BatchVideo } from '@/services/note.ts'
 
 export interface BatchStatusItem {
@@ -18,11 +22,14 @@ export interface BatchVideoPreviewProps {
   selectedVideoIds: string[]
   statusItems?: BatchStatusItem[]
   loading?: boolean
+  loadingMore?: boolean
+  hasMore?: boolean
   showPreviewButton?: boolean
   emptyMessage?: string
   stale?: boolean
   staleMessage?: string
   onPreview: () => void
+  onLoadMore?: () => void
   onSelectAll: () => void
   onClear: () => void
   onToggleVideo: (videoId: string, checked: boolean) => void
@@ -36,28 +43,50 @@ export default function BatchVideoPreview({
   selectedVideoIds,
   statusItems = [],
   loading = false,
+  loadingMore = false,
+  hasMore = false,
   showPreviewButton = true,
   emptyMessage = '先拉取视频列表',
   stale = false,
   staleMessage = '当前列表已过期，请重新拉取',
   onPreview,
+  onLoadMore,
   onSelectAll,
   onClear,
   onToggleVideo,
   onOpenTask,
 }: BatchVideoPreviewProps) {
+  const uniqueVideos = useMemo(() => getUniqueBatchVideos(videos), [videos])
   const selectedIdSet = useMemo(() => new Set(selectedVideoIds), [selectedVideoIds])
   const statusByVideoId = useMemo(
     () => new Map(statusItems.map(item => [item.video_id, item])),
     [statusItems]
   )
-  const selectedCount = videos.reduce(
+  const selectedCount = uniqueVideos.reduce(
     (count, video) => count + (selectedIdSet.has(video.video_id) ? 1 : 0),
     0
   )
+  const allSelected = uniqueVideos.length > 0 && selectedCount === uniqueVideos.length
   const completedCount = statusItems.filter(
     item => item.status === 'SUCCESS' || item.status === 'SKIPPED'
   ).length
+  const handleVideoItemKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    videoId: string,
+    selected: boolean
+  ) => {
+    if (
+      !shouldToggleVideoItemFromKeydown({
+        key: event.key,
+        targetIsCurrentTarget: event.target === event.currentTarget,
+      })
+    ) {
+      return
+    }
+
+    event.preventDefault()
+    onToggleVideo(videoId, !selected)
+  }
 
   return (
     <div className="space-y-3">
@@ -123,8 +152,13 @@ export default function BatchVideoPreview({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                 <Badge variant="outline" className="bg-white text-neutral-700">
-                  已选 {selectedCount} / {videos.length}
+                  已选 {selectedCount} / {uniqueVideos.length}
                 </Badge>
+                {uniqueVideos.length !== videos.length ? (
+                  <Badge variant="outline" className="bg-white text-neutral-500">
+                    已去重 {uniqueVideos.length} 条
+                  </Badge>
+                ) : null}
                 {completedCount > 0 ? <span>已有 {completedCount} 条结果可查看</span> : null}
               </div>
             </div>
@@ -134,7 +168,7 @@ export default function BatchVideoPreview({
                 size="sm"
                 variant="ghost"
                 className="h-7 px-2 text-xs"
-                disabled={videos.length === 0}
+                disabled={uniqueVideos.length === 0 || allSelected}
                 onClick={onSelectAll}
               >
                 全选
@@ -147,19 +181,21 @@ export default function BatchVideoPreview({
                 disabled={selectedCount === 0}
                 onClick={onClear}
               >
-                清空
+                全不选
               </Button>
             </div>
           </div>
 
           <div className="max-h-[28rem] divide-y divide-neutral-100 overflow-y-auto">
-            {videos.map((video, index) => {
+            {uniqueVideos.map((video, index) => {
               const selected = selectedIdSet.has(video.video_id)
               const statusItem = statusByVideoId.get(video.video_id)
 
               return (
-                <label
+                <div
                   key={video.video_id}
+                  role="button"
+                  tabIndex={0}
                   className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] gap-3 border-l-2 px-3 py-3.5 transition-colors ${
                     selected
                       ? 'border-l-primary bg-sky-50/50'
@@ -167,6 +203,7 @@ export default function BatchVideoPreview({
                   }`}
                   title={video.video_id}
                   onClick={() => onToggleVideo(video.video_id, !selected)}
+                  onKeyDown={event => handleVideoItemKeyDown(event, video.video_id, selected)}
                 >
                   <span className="flex flex-col items-center gap-2 pt-0.5">
                     <Checkbox
@@ -217,10 +254,24 @@ export default function BatchVideoPreview({
                       </span>
                     ) : null}
                   </span>
-                </label>
+                </div>
               )
             })}
           </div>
+          {hasMore && onLoadMore ? (
+            <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                disabled={loadingMore}
+                onClick={onLoadMore}
+              >
+                {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                加载更多
+              </Button>
+            </div>
+          ) : null}
         </div>
       )}
     </div>

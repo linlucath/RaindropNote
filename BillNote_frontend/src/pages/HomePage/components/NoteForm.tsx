@@ -16,10 +16,13 @@ import { Info, Loader2, Plus, RefreshCw, Settings2, UploadCloud } from 'lucide-r
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import {
   BatchVideo,
+  FollowingUploader,
   TERMINAL_BATCH_STATUSES,
   TERMINAL_TASK_STATUSES,
   GenerationMode,
+  UploaderVideoPage,
   generateNote,
+  getBilibiliUploaderVideos,
   get_task_list,
   getBatchStatus,
   previewBatchVideos,
@@ -37,6 +40,11 @@ import {
 import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import BatchVideoPreview from '@/pages/HomePage/components/BatchVideoPreview.tsx'
+import {
+  getNextSelectedBatchVideoIds,
+  getUniqueBatchVideos,
+} from '@/pages/HomePage/components/batchVideoSelection.ts'
+import FollowingUploaderPicker from '@/pages/HomePage/components/FollowingUploaderPicker.tsx'
 import {
   Select,
   SelectContent,
@@ -56,6 +64,7 @@ const formSchema = z
   .object({
     video_url: z.string().optional(),
     source_type: z.enum(['single', 'uploader_batch']).default('single'),
+    uploader_source_mode: z.enum(['manual', 'followings']).default('manual'),
     mode: z.enum(['note', 'transcript']).default('note'),
     polish_transcript: z.boolean().default(false).optional(),
     batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
@@ -76,12 +85,18 @@ const formSchema = z
       .optional(),
     allow_audio_transcription: z.boolean().default(false).optional(),
   })
-  .superRefine(({ video_url, platform, source_type, mode, model_name, style, polish_transcript }, ctx) => {
+  .superRefine(
+    (
+      { video_url, platform, source_type, uploader_source_mode, mode, model_name, style, polish_transcript },
+      ctx
+    ) => {
     if (source_type === 'uploader_batch') {
-      if (!video_url) {
-        ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
-      } else if (!video_url.includes('space.bilibili.com')) {
-        ctx.addIssue({ code: 'custom', message: '请输入 B 站 UP 主主页链接', path: ['video_url'] })
+      if (uploader_source_mode === 'manual') {
+        if (!video_url) {
+          ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
+        } else if (!video_url.includes('space.bilibili.com')) {
+          ctx.addIssue({ code: 'custom', message: '请输入 B 站 UP 主主页链接', path: ['video_url'] })
+        }
       }
     } else if (platform === 'local') {
       if (!video_url) {
@@ -127,6 +142,8 @@ interface BatchStatus {
   completed: number
   items?: BatchStatusItem[]
 }
+
+const PREVIEW_PAGE_SIZE = 20
 
 /* -------------------- 可复用子组件 -------------------- */
 const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
@@ -210,6 +227,7 @@ const NoteForm = () => {
     defaultValues: {
       platform: 'bilibili',
       source_type: 'single',
+      uploader_source_mode: 'manual',
       mode: 'note',
       batch_limit: 0,
       skip_existing: true,
@@ -229,12 +247,19 @@ const NoteForm = () => {
   const [batchId, setBatchId] = useState<string | null>(null)
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
   const [batchLoading, setBatchLoading] = useState(false)
+  const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
+  const [previewPage, setPreviewPage] = useState(0)
+  const [previewHasMore, setPreviewHasMore] = useState(false)
   const [previewSignature, setPreviewSignature] = useState<string | null>(null)
+  const [selectedUploader, setSelectedUploader] = useState<FollowingUploader | null>(null)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
   const sourceType = useWatch({ control: form.control, name: 'source_type' }) as
     | 'single'
     | 'uploader_batch'
+  const uploaderSourceMode = useWatch({ control: form.control, name: 'uploader_source_mode' }) as
+    | 'manual'
+    | 'followings'
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
   const mode = useWatch({ control: form.control, name: 'mode' }) as GenerationMode
   const polishTranscript = useWatch({ control: form.control, name: 'polish_transcript' }) as
@@ -255,8 +280,13 @@ const NoteForm = () => {
     [previewVideos, selectedBatchVideoIds]
   )
   const batchRequestSignature = useMemo(
-    () => JSON.stringify({ space_url: (watchedVideoUrl || '').trim(), limit: watchedBatchLimit ?? 0 }),
-    [watchedBatchLimit, watchedVideoUrl]
+    () =>
+      JSON.stringify(
+        uploaderSourceMode === 'followings'
+          ? { source: 'followings', mid: selectedUploader?.mid || '', limit: watchedBatchLimit ?? 0 }
+          : { source: 'manual', space_url: (watchedVideoUrl || '').trim(), limit: watchedBatchLimit ?? 0 }
+      ),
+    [selectedUploader?.mid, uploaderSourceMode, watchedBatchLimit, watchedVideoUrl]
   )
   const previewDirty =
     batchMode && previewVideos.length > 0 && previewSignature !== null && previewSignature !== batchRequestSignature
@@ -277,6 +307,7 @@ const NoteForm = () => {
     form.reset({
       platform: formData.platform || 'bilibili',
       source_type: formData.source_type || 'single',
+      uploader_source_mode: formData.uploader_source_mode || 'manual',
       mode: formData.mode === 'note' ? 'note' : 'transcript',
       polish_transcript:
         formData.polish_transcript ?? formData.mode === 'polished_transcript',
@@ -295,7 +326,12 @@ const NoteForm = () => {
       format: formData.format ?? [],
       allow_audio_transcription: formData.allow_audio_transcription ?? false,
     })
+    setPreviewVideos([])
+    setSelectedBatchVideoIds([])
+    setPreviewPage(0)
+    setPreviewHasMore(false)
     setPreviewSignature(null)
+    setSelectedUploader(null)
   }, [currentTask, currentTaskId, form, modelList])
 
   /* ---- 帮助函数 ---- */
@@ -333,7 +369,11 @@ const NoteForm = () => {
 
     if (values.source_type === 'uploader_batch') {
       if (previewDirty || previewSignature !== batchRequestSignature || previewVideos.length === 0) {
-        toast.error('UP 主链接或视频数已变更，请先重新拉取视频列表')
+        toast.error(
+          values.uploader_source_mode === 'followings'
+            ? '已选择的 UP 主或视频数已变更，请先重新拉取视频列表'
+            : 'UP 主链接或视频数已变更，请先重新拉取视频列表'
+        )
         return
       }
 
@@ -421,6 +461,7 @@ const NoteForm = () => {
     form.reset({
       platform: 'bilibili',
       source_type: 'single',
+      uploader_source_mode: 'manual',
       mode: 'note',
       video_url: '',
       batch_limit: 0,
@@ -436,9 +477,12 @@ const NoteForm = () => {
     })
     setPreviewVideos([])
     setSelectedBatchVideoIds([])
+    setPreviewPage(0)
+    setPreviewHasMore(false)
     setBatchId(null)
     setBatchStatus(null)
     setPreviewSignature(null)
+    setSelectedUploader(null)
     setCurrentTask(null)
   }
   const FormButton = () => {
@@ -485,35 +529,84 @@ const NoteForm = () => {
   }
 
   const handlePreviewBatch = async () => {
-    const valid = await form.trigger(['video_url', 'batch_limit'])
+    await loadPreviewBatchPage(true)
+  }
+
+  const loadPreviewBatchPage = async (reset: boolean) => {
+    const values = form.getValues()
+    const valid = await form.trigger(
+      values.uploader_source_mode === 'followings' ? ['batch_limit'] : ['video_url', 'batch_limit']
+    )
     if (!valid) {
-      toast.error('请先填写有效的 UP 主主页链接')
+      toast.error(
+        values.uploader_source_mode === 'followings'
+          ? '请先确认最多视频数'
+          : '请先填写有效的 UP 主主页链接'
+      )
       return
     }
-
-    const values = form.getValues()
-    setBatchLoading(true)
+    if (values.uploader_source_mode === 'followings' && !selectedUploader) {
+      toast.error('请先从关注列表中选择一个 UP 主')
+      return
+    }
+    const nextPage = reset ? 1 : previewPage + 1
+    const setLoadingState = reset ? setBatchLoading : setPreviewLoadingMore
+    setLoadingState(true)
     try {
-      const data = await previewBatchVideos({
-        space_url: values.video_url || '',
-        limit: values.batch_limit ?? 0,
+      const fallbackPayload: UploaderVideoPage = {
+        items: [],
+        page: nextPage,
+        page_size: PREVIEW_PAGE_SIZE,
+        has_more: false,
+      }
+      const payload =
+        values.uploader_source_mode === 'followings'
+          ? (((await getBilibiliUploaderVideos({
+              mid: selectedUploader?.mid || '',
+              page: nextPage,
+              page_size: PREVIEW_PAGE_SIZE,
+              limit: values.batch_limit ?? 0,
+            })) as UploaderVideoPage) || fallbackPayload)
+          : (((await previewBatchVideos({
+              space_url: values.video_url || '',
+              page: nextPage,
+              page_size: PREVIEW_PAGE_SIZE,
+              limit: values.batch_limit ?? 0,
+            })) as UploaderVideoPage) || fallbackPayload)
+      const videos = getUniqueBatchVideos(payload.items || [])
+
+      let nextVideos: BatchVideo[] = []
+      setPreviewVideos(current => {
+        nextVideos = reset ? videos : getUniqueBatchVideos([...current, ...videos])
+        return nextVideos
       })
-      const videos = data.videos || []
-      setPreviewVideos(videos)
-      setSelectedBatchVideoIds(videos.map(video => video.video_id))
-      setPreviewSignature(
-        JSON.stringify({
-          space_url: (values.video_url || '').trim(),
-          limit: values.batch_limit ?? 0,
+      setSelectedBatchVideoIds(current => {
+        return getNextSelectedBatchVideoIds({
+          currentSelectedIds: current,
+          nextVideoIds: nextVideos.map(video => video.video_id),
+          reset,
         })
-      )
-      setBatchId(null)
-      setBatchStatus(null)
-      if (!videos.length) {
+      })
+      setPreviewPage(payload.page)
+      setPreviewHasMore(payload.has_more)
+
+      if (reset) {
+        setPreviewSignature(
+          JSON.stringify(
+            values.uploader_source_mode === 'followings'
+              ? { source: 'followings', mid: selectedUploader?.mid || '', limit: values.batch_limit ?? 0 }
+              : { source: 'manual', space_url: (values.video_url || '').trim(), limit: values.batch_limit ?? 0 }
+          )
+        )
+        setBatchId(null)
+        setBatchStatus(null)
+      }
+
+      if (reset && !videos.length) {
         toast.error('没有找到可预览的视频')
       }
     } finally {
-      setBatchLoading(false)
+      setLoadingState(false)
     }
   }
 
@@ -599,11 +692,15 @@ const NoteForm = () => {
                               if (option.value === 'uploader_batch') {
                                 form.setValue('platform', 'bilibili')
                                 form.setValue('mode', 'transcript')
+                                form.setValue('uploader_source_mode', 'manual')
                               }
                               setPreviewVideos([])
                               setSelectedBatchVideoIds([])
+                              setPreviewPage(0)
+                              setPreviewHasMore(false)
                               setPreviewSignature(null)
                               setBatchStatus(null)
+                              setSelectedUploader(null)
                             }}
                           >
                             {option.label}
@@ -658,10 +755,55 @@ const NoteForm = () => {
             </div>
           </WorkspaceSection>
 
-          <WorkspaceSection title={batchMode ? '1. 粘贴主页' : '视频来源'}>
+          <WorkspaceSection title={batchMode ? '1. 视频来源' : '视频来源'}>
             <div className="space-y-3">
+              {batchMode ? (
+                <FormField
+                  control={form.control}
+                  name="uploader_source_mode"
+                  render={({ field }) => (
+                    <FormItem>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { value: 'manual', label: '手动输入主页' },
+                          { value: 'followings', label: '从关注列表选择' },
+                        ].map(option => {
+                          const active = field.value === option.value
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`h-9 rounded-md border px-3 text-sm transition-colors ${
+                                active
+                                  ? 'border-neutral-800 bg-neutral-900 text-white'
+                                  : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50'
+                              }`}
+                              onClick={() => {
+                                field.onChange(option.value)
+                                setPreviewVideos([])
+                                setSelectedBatchVideoIds([])
+                                setPreviewPage(0)
+                                setPreviewHasMore(false)
+                                setPreviewSignature(null)
+                                setBatchId(null)
+                                setBatchStatus(null)
+                                if (option.value === 'manual') {
+                                  setSelectedUploader(null)
+                                }
+                              }}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
               <div
-                className={batchMode ? 'grid grid-cols-[minmax(0,1fr)_auto] gap-2' : 'flex gap-2'}
+                className={batchMode && uploaderSourceMode === 'manual' ? 'grid grid-cols-[minmax(0,1fr)_auto] gap-2' : 'flex gap-2'}
               >
                 {!batchMode && (
                   <FormField
@@ -699,32 +841,34 @@ const NoteForm = () => {
                     )}
                   />
                 )}
-                <FormField
-                  control={form.control}
-                  name="video_url"
-                  render={({ field }) => (
-                    <FormItem className="min-w-0 flex-1">
-                      <Input
-                        placeholder={
-                          batchMode
-                            ? 'https://space.bilibili.com/123456'
-                            : platform === 'local'
-                              ? '请输入本地视频路径'
-                              : '请输入视频网站链接'
-                        }
-                        {...field}
-                        onChange={event => {
-                          if (editing) {
-                            setCurrentTask(null)
+                {(!batchMode || uploaderSourceMode === 'manual') && (
+                  <FormField
+                    control={form.control}
+                    name="video_url"
+                    render={({ field }) => (
+                      <FormItem className="min-w-0 flex-1">
+                        <Input
+                          placeholder={
+                            batchMode
+                              ? 'https://space.bilibili.com/123456'
+                              : platform === 'local'
+                                ? '请输入本地视频路径'
+                                : '请输入视频网站链接'
                           }
-                          field.onChange(event)
-                        }}
-                      />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                {batchMode && (
+                          {...field}
+                          onChange={event => {
+                            if (editing) {
+                              setCurrentTask(null)
+                            }
+                            field.onChange(event)
+                          }}
+                        />
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+                {batchMode && uploaderSourceMode === 'manual' && (
                   <Button
                     type="button"
                     variant="outline"
@@ -772,6 +916,45 @@ const NoteForm = () => {
                   </div>
                 </div>
               )}
+
+              {batchMode && uploaderSourceMode === 'followings' ? (
+                <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
+                  <FollowingUploaderPicker
+                    selectedMid={selectedUploader?.mid}
+                    onSelectUploader={uploader => {
+                      setSelectedUploader(uploader)
+                      setPreviewVideos([])
+                      setSelectedBatchVideoIds([])
+                      setPreviewPage(0)
+                      setPreviewHasMore(false)
+                      setPreviewSignature(null)
+                      setBatchId(null)
+                      setBatchStatus(null)
+                    }}
+                  />
+                  {selectedUploader ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-neutral-600">
+                      <span>已选择 UP 主</span>
+                      <span className="font-medium text-neutral-900">{selectedUploader.name}</span>
+                      <span className="text-neutral-400">UID {selectedUploader.mid}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 px-3"
+                        disabled={batchLoading}
+                        onClick={handlePreviewBatch}
+                      >
+                        {batchLoading ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                        )}
+                        拉取该 UP 主视频
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <FormField
                 control={form.control}
@@ -831,11 +1014,22 @@ const NoteForm = () => {
                   selectedVideoIds={selectedBatchVideoIds}
                   statusItems={batchStatus?.items || []}
                   loading={batchLoading}
+                  loadingMore={previewLoadingMore}
+                  hasMore={previewHasMore}
                   showPreviewButton={false}
-                  emptyMessage="粘贴 UP 主主页后拉取视频标题"
+                  emptyMessage={
+                    uploaderSourceMode === 'followings'
+                      ? '先从关注列表选择一个 UP 主，再拉取视频标题'
+                      : '粘贴 UP 主主页后拉取视频标题'
+                  }
                   stale={previewDirty}
-                  staleMessage="你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。"
+                  staleMessage={
+                    uploaderSourceMode === 'followings'
+                      ? '你修改了所选 UP 主或最多视频数，当前标题列表不再对应最新条件。'
+                      : '你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。'
+                  }
                   onPreview={handlePreviewBatch}
+                  onLoadMore={() => void loadPreviewBatchPage(false)}
                   onSelectAll={() =>
                     setSelectedBatchVideoIds(previewVideos.map(video => video.video_id))
                   }
@@ -850,7 +1044,9 @@ const NoteForm = () => {
 
                 {previewVideos.length > 0 && !previewDirty && (
                   <div className="text-xs text-neutral-500">
-                    当前列表已锁定到这次拉取结果。修改链接或视频数后，需要重新拉取才能提交。
+                    当前列表已锁定到这次拉取结果。修改
+                    {uploaderSourceMode === 'followings' ? '所选 UP 主' : '链接'}
+                    或视频数后，需要重新拉取才能提交。
                   </div>
                 )}
 

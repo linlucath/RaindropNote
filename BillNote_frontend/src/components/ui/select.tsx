@@ -16,15 +16,12 @@ function SelectValue({ ...props }: React.ComponentProps<typeof SelectPrimitive.V
   return <SelectPrimitive.Value data-slot="select-value" {...props} />
 }
 
-function SelectTrigger({
-  className,
-  size = 'default',
-  children,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
-  size?: 'sm' | 'default'
-}) {
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
+    size?: 'sm' | 'default'
+  }
+>(({ className, size = 'default', children, ...props }, ref) => {
   return (
     <SelectPrimitive.Trigger
       ref={ref}
@@ -42,15 +39,12 @@ function SelectTrigger({
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   )
-}
+})
 
-function SelectContent({
-  className,
-  children,
-  position = 'popper',
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+const SelectContent = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+>(({ className, children, position = 'popper', ...props }, ref) => {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -79,13 +73,12 @@ function SelectContent({
       </SelectPrimitive.Content>
     </SelectPrimitive.Portal>
   )
-}
+})
 
-function SelectLabel({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Label>) {
+const SelectLabel = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
+>(({ className, ...props }, ref) => {
   return (
     <SelectPrimitive.Label
       ref={ref}
@@ -94,14 +87,12 @@ function SelectLabel({
       {...props}
     />
   )
-}
+})
 
-function SelectItem({
-  className,
-  children,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+const SelectItem = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => {
   return (
     <SelectPrimitive.Item
       ref={ref}
@@ -120,13 +111,12 @@ function SelectItem({
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   )
-}
+})
 
-function SelectSeparator({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Separator>) {
+const SelectSeparator = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
+>(({ className, ...props }, ref) => {
   return (
     <SelectPrimitive.Separator
       ref={ref}
@@ -135,13 +125,12 @@ function SelectSeparator({
       {...props}
     />
   )
-}
+})
 
-function SelectScrollUpButton({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
+const SelectScrollUpButton = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.ScrollUpButton>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollUpButton>
+>(({ className, ...props }, ref) => {
   return (
     <SelectPrimitive.ScrollUpButton
       ref={ref}
@@ -152,13 +141,12 @@ function SelectScrollUpButton({
       <ChevronUpIcon className="size-4" />
     </SelectPrimitive.ScrollUpButton>
   )
-}
+})
 
-function SelectScrollDownButton({
-  className,
-  ref,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
+const SelectScrollDownButton = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.ScrollDownButton>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.ScrollDownButton>
+>(({ className, ...props }, ref) => {
   return (
     <SelectPrimitive.ScrollDownButton
       ref={ref}
@@ -169,7 +157,15 @@ function SelectScrollDownButton({
       <ChevronDownIcon className="size-4" />
     </SelectPrimitive.ScrollDownButton>
   )
-}
+})
+
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
+SelectContent.displayName = SelectPrimitive.Content.displayName
+SelectLabel.displayName = SelectPrimitive.Label.displayName
+SelectItem.displayName = SelectPrimitive.Item.displayName
+SelectSeparator.displayName = SelectPrimitive.Separator.displayName
+SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName
+SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName
 
 export {
   Select,

@@ -66,6 +66,52 @@ class TestBatchRouter(unittest.TestCase):
         self.assertEqual(videos[1]["title"], "已有标题")
         extract_video.assert_called_once_with("https://www.bilibili.com/video/BV1")
 
+    def test_preview_page_returns_has_more_when_next_page_exists(self):
+        with patch("app.routers.batch._extract_flat_playlist", return_value={
+            "entries": [
+                {"id": "BV1", "title": "视频1"},
+                {"id": "BV2", "title": "视频2"},
+                {"id": "BV3", "title": "视频3"},
+            ]
+        }) as extract_playlist:
+            payload = batch.preview_bilibili_space_page(
+                "https://space.bilibili.com/1/upload/video",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual([v["video_id"] for v in payload["items"]], ["BV1", "BV2"])
+        self.assertTrue(payload["has_more"])
+        extract_playlist.assert_called_once_with(
+            "https://space.bilibili.com/1/upload/video",
+            start=1,
+            end=3,
+        )
+
+    def test_preview_page_respects_limit_and_stops_loading_more(self):
+        with patch("app.routers.batch._extract_flat_playlist", return_value={
+            "entries": [
+                {"id": "BV41", "title": "视频41"},
+                {"id": "BV42", "title": "视频42"},
+                {"id": "BV43", "title": "视频43"},
+            ]
+        }) as extract_playlist:
+            payload = batch.preview_bilibili_space_page(
+                "https://space.bilibili.com/1/upload/video",
+                page=3,
+                page_size=20,
+                limit=42,
+            )
+
+        self.assertEqual([v["video_id"] for v in payload["items"]], ["BV41", "BV42"])
+        self.assertFalse(payload["has_more"])
+        extract_playlist.assert_called_once_with(
+            "https://space.bilibili.com/1/upload/video",
+            start=41,
+            end=42,
+        )
+
     def test_extract_flat_playlist_omits_playlistend_when_limit_is_zero(self):
         captured_options = {}
 
