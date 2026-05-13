@@ -18,6 +18,12 @@ for (const fileName of componentFiles) {
   })
 }
 
+test('checkbox.tsx avoids the React 19-incompatible radix checkbox primitive', () => {
+  const source = readFileSync(path.join(__dirname, 'checkbox.tsx'), 'utf8')
+
+  assert.doesNotMatch(source, /@radix-ui\/react-checkbox/)
+})
+
 test('select.tsx uses stable forwarded refs for all ref-bearing wrappers', () => {
   const source = readFileSync(path.join(__dirname, 'select.tsx'), 'utf8')
 

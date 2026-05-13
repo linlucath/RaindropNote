@@ -11,4 +11,5 @@ const switchSource = readFileSync(path.join(__dirname, 'switch.tsx'), 'utf8')
 test('Switch uses a stable forwarded ref implementation', () => {
   assert.match(switchSource, /React\.forwardRef/)
   assert.doesNotMatch(switchSource, /function Switch\(\{[^)]*\bref\b/)
+  assert.doesNotMatch(switchSource, /@radix-ui\/react-switch/)
 })
