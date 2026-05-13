@@ -66,6 +66,20 @@ class TestBatchRouter(unittest.TestCase):
         self.assertEqual(videos[1]["title"], "已有标题")
         extract_video.assert_called_once_with("https://www.bilibili.com/video/BV1")
 
+    def test_enrich_missing_titles_retries_failed_metadata_lookup(self):
+        videos = [
+            {"video_id": "BV1", "video_url": "https://www.bilibili.com/video/BV1", "title": ""},
+        ]
+
+        with patch(
+            "app.routers.batch._extract_video_metadata",
+            side_effect=[TimeoutError("timeout"), {"title": "补回标题"}],
+        ) as extract_video:
+            enriched = batch._enrich_missing_titles(videos)
+
+        self.assertEqual(enriched[0]["title"], "补回标题")
+        self.assertEqual(extract_video.call_count, 2)
+
     def test_preview_page_returns_has_more_when_next_page_exists(self):
         with patch("app.routers.batch._extract_flat_playlist", return_value={
             "entries": [
