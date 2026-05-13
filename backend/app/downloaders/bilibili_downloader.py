@@ -10,6 +10,7 @@ import yt_dlp
 from app.downloaders.base import Downloader, DownloadQuality, QUALITY_MAP
 from app.models.notes_model import AudioDownloadResult
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
+from app.services.cookie_manager import CookieConfigManager
 from app.utils.path_helper import get_data_dir
 from app.utils.url_parser import extract_video_id
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # B站 cookies 文件路径
 BILIBILI_COOKIES_FILE = os.getenv("BILIBILI_COOKIES_FILE", "cookies.txt")
+cookie_manager = CookieConfigManager()
 
 
 def _bilibili_cookies_path() -> Path:
@@ -43,7 +45,15 @@ def _apply_bilibili_ydl_defaults(ydl_opts: dict) -> dict:
         ydl_opts['cookiefile'] = str(cookies_path)
         logger.info(f"使用 cookies 文件: {cookies_path}")
     else:
-        logger.warning(f"B站 cookies 文件不存在: {cookies_path}，下载可能失败")
+        raw_cookie = (cookie_manager.get('bilibili') or '').strip()
+        if raw_cookie:
+            ydl_opts['http_headers'] = {
+                **ydl_opts.get('http_headers', {}),
+                'Cookie': raw_cookie,
+            }
+            logger.info('使用配置中的 B站 Cookie')
+        else:
+            logger.warning(f"B站 cookies 文件不存在: {cookies_path}，且未配置 B站 Cookie，下载可能失败")
 
     return ydl_opts
 

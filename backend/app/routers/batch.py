@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
 from app.routers.note import NOTE_OUTPUT_DIR, run_note_task
+from app.services.cookie_manager import CookieConfigManager
 from app.services.progress_state import read_task_status, request_task_cancel, write_task_status
 from app.utils.response import ResponseWrapper as R
 
@@ -24,11 +25,14 @@ BATCH_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 BILIBILI_COOKIES_FILE = os.getenv("BILIBILI_COOKIES_FILE", "cookies.txt")
 _batch_lock = Lock()
 _batches: dict[str, dict] = {}
+_cookie_manager = CookieConfigManager()
 
 
 class BatchPreviewRequest(BaseModel):
     space_url: str
     limit: int = Field(default=0, ge=0, le=500)
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=50)
 
 
 class BatchVideo(BaseModel):
@@ -153,18 +157,43 @@ def _cookie_file_path() -> Path:
     return Path(__file__).parent.parent.parent / BILIBILI_COOKIES_FILE
 
 
-def _extract_flat_playlist(space_url: str, limit: int) -> dict:
+def _apply_bilibili_cookie(ydl_opts: dict) -> dict:
+    cookies_path = _cookie_file_path()
+    if cookies_path.exists():
+        ydl_opts["cookiefile"] = str(cookies_path)
+        return ydl_opts
+
+    cookie = (_cookie_manager.get("bilibili") or "").strip()
+    if cookie:
+        headers = dict(ydl_opts.get("http_headers") or {})
+        headers["Cookie"] = cookie
+        ydl_opts["http_headers"] = headers
+    return ydl_opts
+
+
+def _extract_flat_playlist(space_url: str, limit: int = 0, start: Optional[int] = None, end: Optional[int] = None) -> dict:
     ydl_opts = {
         "extract_flat": True,
         "skip_download": True,
         "quiet": True,
         "nocheckcertificate": True,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.bilibili.com/",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        },
     }
-    if limit > 0:
+    if start is not None:
+        ydl_opts["playliststart"] = start
+    if end is not None:
+        ydl_opts["playlistend"] = end
+    elif limit > 0:
         ydl_opts["playlistend"] = limit
-    cookies_path = _cookie_file_path()
-    if cookies_path.exists():
-        ydl_opts["cookiefile"] = str(cookies_path)
+    ydl_opts = _apply_bilibili_cookie(ydl_opts)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(space_url, download=False)
@@ -177,10 +206,17 @@ def _extract_video_metadata(video_url: str) -> dict:
         "nocheckcertificate": True,
         "noplaylist": True,
         "socket_timeout": 10,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://www.bilibili.com/",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        },
     }
-    cookies_path = _cookie_file_path()
-    if cookies_path.exists():
-        ydl_opts["cookiefile"] = str(cookies_path)
+    ydl_opts = _apply_bilibili_cookie(ydl_opts)
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(video_url, download=False)
@@ -215,6 +251,53 @@ def preview_bilibili_space(space_url: str, limit: int = 10) -> list[dict]:
     videos = normalize_bilibili_entries(data.get("entries") or [])
     limited_videos = videos[:limit] if limit > 0 else videos
     return _enrich_missing_titles(limited_videos)
+
+
+def preview_bilibili_space_page(
+    space_url: str,
+    page: int = 1,
+    page_size: int = 20,
+    limit: int = 0,
+) -> dict:
+    start = (page - 1) * page_size + 1
+    if limit > 0 and start > limit:
+        return {
+            "items": [],
+            "page": page,
+            "page_size": page_size,
+            "has_more": False,
+            "total": limit,
+        }
+
+    extra_probe = 1
+    if limit > 0:
+        remaining = limit - start + 1
+        fetch_size = max(min(page_size + extra_probe, remaining), 0)
+    else:
+        fetch_size = page_size + extra_probe
+
+    if fetch_size <= 0:
+        return {
+            "items": [],
+            "page": page,
+            "page_size": page_size,
+            "has_more": False,
+            "total": limit if limit > 0 else None,
+        }
+
+    end = start + fetch_size - 1
+    data = _extract_flat_playlist(space_url, start=start, end=end)
+    videos = normalize_bilibili_entries(data.get("entries") or [])
+    has_more = len(videos) > page_size
+    visible_videos = _enrich_missing_titles(videos[:page_size])
+    total = limit if limit > 0 else None
+    return {
+        "items": visible_videos,
+        "page": page,
+        "page_size": page_size,
+        "has_more": has_more,
+        "total": total,
+    }
 
 
 
@@ -393,8 +476,12 @@ def run_batch(batch_id: str, request: BatchStartRequest) -> None:
 
 @router.post("/batch/preview")
 def batch_preview(data: BatchPreviewRequest):
-    videos = preview_bilibili_space(data.space_url, data.limit)
-    return R.success({"videos": videos})
+    return R.success(preview_bilibili_space_page(
+        data.space_url,
+        page=data.page,
+        page_size=data.page_size,
+        limit=data.limit,
+    ))
 
 
 @router.post("/batch/start")

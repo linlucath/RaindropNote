@@ -48,6 +48,7 @@ export interface Task {
   formData: {
     video_url: string
     source_type?: 'single' | 'uploader_batch'
+    uploader_source_mode?: 'manual' | 'followings'
     link: undefined | boolean
     screenshot: undefined | boolean
     platform: string

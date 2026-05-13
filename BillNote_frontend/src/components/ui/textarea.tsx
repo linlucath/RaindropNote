@@ -2,7 +2,10 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-function Textarea({ className, ref, ...props }: React.ComponentProps<'textarea'>) {
+const Textarea = React.forwardRef<
+  HTMLTextAreaElement,
+  React.ComponentPropsWithoutRef<'textarea'>
+>(({ className, ...props }, ref) => {
   return (
     <textarea
       ref={ref}
@@ -14,6 +17,8 @@ function Textarea({ className, ref, ...props }: React.ComponentProps<'textarea'>
       {...props}
     />
   )
-}
+})
+
+Textarea.displayName = 'Textarea'
 
 export { Textarea }

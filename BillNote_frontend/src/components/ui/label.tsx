@@ -5,7 +5,10 @@ import * as LabelPrimitive from '@radix-ui/react-label'
 
 import { cn } from '@/lib/utils'
 
-function Label({ className, ref, ...props }: React.ComponentProps<typeof LabelPrimitive.Root>) {
+const Label = React.forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
+>(({ className, ...props }, ref) => {
   return (
     <LabelPrimitive.Root
       ref={ref}
@@ -17,6 +20,8 @@ function Label({ className, ref, ...props }: React.ComponentProps<typeof LabelPr
       {...props}
     />
   )
-}
+})
+
+Label.displayName = LabelPrimitive.Root.displayName
 
 export { Label }

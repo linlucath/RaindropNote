@@ -3,6 +3,8 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 use std::env;
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,6 +25,11 @@ pub fn run() {
             // 收集所有系统环境变量
             let mut all_env_vars = HashMap::new();
             for (key, value) in env::vars() {
+                all_env_vars.insert(key, value);
+            }
+
+            // 加载 .env，优先补齐桌面脚本 / Finder 启动时缺失的环境变量
+            for (key, value) in load_env_overrides(&exe_path) {
                 all_env_vars.insert(key, value);
             }
 
@@ -100,6 +107,84 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn load_env_overrides(exe_path: &Path) -> HashMap<String, String> {
+    let mut merged = HashMap::new();
+    for path in candidate_env_files(exe_path) {
+        if let Ok(vars) = parse_env_file(&path) {
+            for (key, value) in vars {
+                merged.insert(key, value);
+            }
+        }
+    }
+    merged
+}
+
+fn candidate_env_files(exe_path: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+
+    if let Ok(current_dir) = env::current_dir() {
+        push_env_candidates(&mut files, &current_dir);
+    }
+
+    if let Some(exe_dir) = exe_path.parent() {
+        push_env_candidates(&mut files, exe_dir);
+    }
+
+    files
+}
+
+fn push_env_candidates(files: &mut Vec<PathBuf>, start: &Path) {
+    let mut current = Some(start.to_path_buf());
+    let mut depth = 0;
+
+    while let Some(dir) = current {
+        let env_path = dir.join(".env");
+        if env_path.exists() && !files.contains(&env_path) {
+            files.push(env_path);
+        }
+        depth += 1;
+        if depth >= 6 {
+            break;
+        }
+        current = dir.parent().map(|parent| parent.to_path_buf());
+    }
+}
+
+fn parse_env_file(path: &Path) -> Result<HashMap<String, String>, std::io::Error> {
+    let mut vars = HashMap::new();
+    let content = fs::read_to_string(path)?;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+
+        let mut value = value.trim().to_string();
+        if let Some(comment_index) = value.find(" #") {
+            value.truncate(comment_index);
+            value = value.trim().to_string();
+        }
+        value = value
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+
+        vars.insert(key.to_string(), value);
+    }
+
+    Ok(vars)
 }
 
 // 获取额外的二进制路径

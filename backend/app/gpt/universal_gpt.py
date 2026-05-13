@@ -5,6 +5,7 @@ import os
 import hashlib
 import json
 import time
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,9 +39,82 @@ class UniversalGPT(GPT):
         self.polished_transcript_max_source_chars = int(os.getenv("POLISHED_TRANSCRIPT_MAX_SOURCE_CHARS", "4000"))
         self.checkpoint_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.llm_cache_enabled = os.getenv("LLM_CACHE_ENABLED", "1").lower() not in {"0", "false", "no"}
+        self.llm_cache_dir = Path(
+            os.getenv(
+                "LLM_CACHE_DIR",
+                str(Path(__file__).resolve().parents[3] / ".cache" / "llm"),
+            )
+        )
         # 初始化时缓存重试配置，避免每次请求重复读取环境变量
         self._max_retry_attempts = max(1, int(os.getenv("OPENAI_RETRY_ATTEMPTS", "3")))
         self._retry_base_backoff = float(os.getenv("OPENAI_RETRY_BACKOFF_SECONDS", "1.5"))
+
+    @staticmethod
+    def _build_cached_response(content: str):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            from_cache=True,
+        )
+
+    def _cache_provider_base_url(self) -> str | None:
+        base_url = getattr(self.client, "base_url", None)
+        if base_url is None and hasattr(self.client, "_base_url"):
+            base_url = getattr(self.client, "_base_url")
+        return str(base_url) if base_url else None
+
+    def _llm_cache_key(self, messages: list) -> str:
+        payload = {
+            "version": 1,
+            "provider_base_url": self._cache_provider_base_url(),
+            "model": self.model,
+            "temperature": self.temperature,
+            "messages": messages,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _llm_cache_path(self, cache_key: str) -> Path:
+        return self.llm_cache_dir / f"{cache_key}.json"
+
+    def _load_llm_cache(self, cache_key: str):
+        if not self.llm_cache_enabled:
+            return None
+
+        path = self._llm_cache_path(cache_key)
+        if not path.exists():
+            return None
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            path.unlink(missing_ok=True)
+            return None
+
+        content = payload.get("content")
+        if not isinstance(content, str):
+            path.unlink(missing_ok=True)
+            return None
+
+        return self._build_cached_response(content)
+
+    def _save_llm_cache(self, cache_key: str, content: str) -> None:
+        if not self.llm_cache_enabled or not isinstance(content, str) or not content.strip():
+            return
+
+        self.llm_cache_dir.mkdir(parents=True, exist_ok=True)
+        path = self._llm_cache_path(cache_key)
+        payload = {
+            "version": 1,
+            "provider_base_url": self._cache_provider_base_url(),
+            "model": self.model,
+            "temperature": self.temperature,
+            "content": content,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
 
     def _format_time(self, seconds: float) -> str:
         return str(timedelta(seconds=int(seconds)))[2:]
@@ -361,14 +435,22 @@ class UniversalGPT(GPT):
         return status in {408, 409, 429, 500, 502, 503, 504, 524}
 
     def _chat_completion_create(self, messages: list):
+        cache_key = self._llm_cache_key(messages)
+        cached_response = self._load_llm_cache(cache_key)
+        if cached_response is not None:
+            return cached_response
+
         last_exc = None
         for attempt in range(self._max_retry_attempts):
             try:
-                return self.client.chat.completions.create(
+                response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=self.temperature
                 )
+                content = response.choices[0].message.content or ""
+                self._save_llm_cache(cache_key, content)
+                return response
             except Exception as exc:
                 last_exc = exc
                 if attempt == self._max_retry_attempts - 1 or not self._is_retryable_error(exc):

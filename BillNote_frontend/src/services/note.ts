@@ -164,8 +164,53 @@ export interface BatchVideo {
   title?: string
 }
 
-export const previewBatchVideos = async (data: { space_url: string; limit?: number }) => {
+export interface FollowingUploader {
+  mid: string
+  name: string
+  face: string
+  sign: string
+}
+
+export interface FollowingUploaderPage {
+  items: FollowingUploader[]
+  page: number
+  page_size: number
+  has_more: boolean
+  total: number
+}
+
+export interface UploaderVideoPage {
+  items: BatchVideo[]
+  page: number
+  page_size: number
+  has_more: boolean
+  total?: number | null
+}
+
+export const previewBatchVideos = async (data: {
+  space_url: string
+  limit?: number
+  page?: number
+  page_size?: number
+}) => {
   return await request.post('/batch/preview', data, { timeout: 60000 })
+}
+
+export const getBilibiliFollowings = async (params?: {
+  page?: number
+  page_size?: number
+  keyword?: string
+}) => {
+  return await request.get('/bilibili/followings', { params, timeout: 15000 })
+}
+
+export const getBilibiliUploaderVideos = async (params: {
+  mid: string
+  limit?: number
+  page?: number
+  page_size?: number
+}) => {
+  return await request.get('/bilibili/uploader_videos', { params, timeout: 60000 })
 }
 
 export const startBatch = async (data: {
