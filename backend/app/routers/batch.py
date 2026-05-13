@@ -243,6 +243,16 @@ def _enrich_missing_titles(videos: list[dict]) -> list[dict]:
             title = (metadata.get("title") or "").strip()
             if title:
                 enriched[index]["title"] = title
+
+    retry_indexes = [index for index in missing_title_indexes if not enriched[index].get("title")]
+    for index in retry_indexes:
+        try:
+            metadata = _extract_video_metadata(enriched[index]["video_url"])
+        except Exception:
+            continue
+        title = (metadata.get("title") or "").strip()
+        if title:
+            enriched[index]["title"] = title
     return enriched
 
 
@@ -287,7 +297,7 @@ def preview_bilibili_space_page(
 
     end = start + fetch_size - 1
     data = _extract_flat_playlist(space_url, start=start, end=end)
-    videos = normalize_bilibili_entries(data.get("entries") or [])
+    videos = normalize_bilibili_entries(data.get("entries") or [])[:fetch_size]
     has_more = len(videos) > page_size
     visible_videos = _enrich_missing_titles(videos[:page_size])
     total = limit if limit > 0 else None
