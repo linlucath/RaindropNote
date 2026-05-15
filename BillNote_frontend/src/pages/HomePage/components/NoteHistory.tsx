@@ -10,8 +10,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx'
-import LazyImage from "@/components/LazyImage.tsx";
-import {FC, useState, useEffect, useMemo} from 'react'
+import { FC, useEffect, useMemo, useState } from 'react'
 import { get_task_list } from '@/services/note.ts'
 
 interface NoteHistoryProps {
@@ -23,8 +22,6 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
   const tasks = useTaskStore(state => state.tasks)
   const removeTask = useTaskStore(state => state.removeTask)
   const syncSavedTasks = useTaskStore(state => state.syncSavedTasks)
-  // 确保baseURL没有尾部斜杠
-  const baseURL = (String(import.meta.env.VITE_API_BASE_URL || 'api')).replace(/\/$/, '')
   const [search, setSearch] = useState('')
 
   useEffect(() => {
@@ -33,43 +30,45 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
       .catch(error => console.warn('同步历史任务失败', error))
   }, [syncSavedTasks])
 
-  const fuse = useMemo(() => new Fuse(tasks, {
-    keys: ['audioMeta.title'],
-    threshold: 0.4 // 匹配精度（越低越严格）
-  }), [tasks])
+  const fuse = useMemo(
+    () =>
+      new Fuse(tasks, {
+        keys: ['audioMeta.title'],
+        threshold: 0.4, // 匹配精度（越低越严格）
+      }),
+    [tasks]
+  )
   const filteredTasks = search.trim()
-      ? fuse.search(search).map(result => result.item)
-      : tasks
+    ? fuse.search(search).map(result => result.item)
+    : tasks
   if (filteredTasks.length === 0) {
     return (
-        <>
-          <div className="mb-2">
-            <input
-                type="text"
-                placeholder="搜索笔记标题..."
-                className="w-full rounded border border-neutral-300 px-3 py-1 text-sm outline-none focus:border-primary"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="rounded-md border border-neutral-200 bg-neutral-50 py-6 text-center">
-            <p className="text-sm text-neutral-500">暂无记录</p>
-          </div>
-        </>
-
-    )
-  }
-
-
-  return (
-    <>
-      <div className="mb-2">
-        <input
+      <>
+        <div className="mb-2">
+          <input
             type="text"
             placeholder="搜索笔记标题..."
             className="w-full rounded border border-neutral-300 px-3 py-1 text-sm outline-none focus:border-primary"
             value={search}
             onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="rounded-md border border-neutral-200 bg-neutral-50 py-6 text-center">
+          <p className="text-sm text-neutral-500">暂无记录</p>
+        </div>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div className="mb-2">
+        <input
+          type="text"
+          placeholder="搜索笔记标题..."
+          className="w-full rounded border border-neutral-300 px-3 py-1 text-sm outline-none focus:border-primary"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
         />
       </div>
       <div className="flex flex-col gap-2 overflow-hidden">
@@ -82,32 +81,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
               selectedId === task.id && 'border-primary bg-primary-light'
             )}
           >
-            <div
-              className={cn('flex items-center gap-4')}
-            >
-              {/* 封面图 */}
-              {task.platform === 'local' ? (
-                <img
-                  src={
-                    task.audioMeta.cover_url ? `${task.audioMeta.cover_url}` : '/placeholder.png'
-                  }
-                  alt="封面"
-                  className="h-10 w-12 rounded-md object-cover"
-                />
-              ) : (
-                  <LazyImage
-
-                      src={
-                        task.audioMeta.cover_url
-                            ? `${baseURL}/image_proxy?url=${encodeURIComponent(task.audioMeta.cover_url)}`
-                            : '/placeholder.png'
-                      }
-                      alt="封面"
-                  />
-              )}
-
-              {/* 标题 + 状态 */}
-
+            <div className={cn('flex items-center gap-4')}>
               <div className="flex w-full items-center justify-between gap-2">
                 <TooltipProvider>
                   <Tooltip>
@@ -126,12 +100,16 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
             <div className={'mt-2 flex items-center justify-between text-[10px]'}>
               <div className="shrink-0">
                 {task.formData?.mode === 'transcript' && (
-                  <div className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}>
+                  <div
+                    className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}
+                  >
                     文字稿
                   </div>
                 )}
                 {task.formData?.mode === 'polished_transcript' && (
-                  <div className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}>
+                  <div
+                    className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}
+                  >
                     校对稿
                   </div>
                 )}

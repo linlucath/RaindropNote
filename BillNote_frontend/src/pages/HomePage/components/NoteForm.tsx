@@ -7,7 +7,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { FieldErrors, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -16,12 +16,14 @@ import { Info, Loader2, Plus, RefreshCw, Settings2, UploadCloud } from 'lucide-r
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import {
   BatchVideo,
+  BilibiliDynamicPage,
   FollowingUploader,
   TERMINAL_BATCH_STATUSES,
   TERMINAL_TASK_STATUSES,
   GenerationMode,
   UploaderVideoPage,
   generateNote,
+  getBilibiliDynamics,
   getBilibiliUploaderVideos,
   get_task_list,
   getBatchStatus,
@@ -41,9 +43,10 @@ import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import BatchVideoPreview from '@/pages/HomePage/components/BatchVideoPreview.tsx'
 import {
-  getNextSelectedBatchVideoIds,
+  getNextBatchPreviewState,
   getUniqueBatchVideos,
 } from '@/pages/HomePage/components/batchVideoSelection.ts'
+import { shouldReuseTaskForSubmission } from '@/pages/HomePage/components/taskSubmission.ts'
 import FollowingUploaderPicker from '@/pages/HomePage/components/FollowingUploaderPicker.tsx'
 import {
   Select,
@@ -63,7 +66,7 @@ import toast from 'react-hot-toast'
 const formSchema = z
   .object({
     video_url: z.string().optional(),
-    source_type: z.enum(['single', 'uploader_batch']).default('single'),
+    source_type: z.enum(['single', 'uploader_batch', 'dynamics']).default('single'),
     uploader_source_mode: z.enum(['manual', 'followings']).default('manual'),
     mode: z.enum(['note', 'transcript']).default('note'),
     polish_transcript: z.boolean().default(false).optional(),
@@ -98,6 +101,8 @@ const formSchema = z
           ctx.addIssue({ code: 'custom', message: '请输入 B 站 UP 主主页链接', path: ['video_url'] })
         }
       }
+    } else if (source_type === 'dynamics') {
+      // Followed dynamics are account-backed and do not need a direct video URL input.
     } else if (platform === 'local') {
       if (!video_url) {
         ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
@@ -144,6 +149,20 @@ interface BatchStatus {
 }
 
 const PREVIEW_PAGE_SIZE = 20
+
+const getDynamicRequestPageSize = ({
+  batchLimit,
+  loadedCount,
+}: {
+  batchLimit: number
+  loadedCount: number
+}) => {
+  if (batchLimit <= 0) {
+    return PREVIEW_PAGE_SIZE
+  }
+
+  return Math.max(Math.min(PREVIEW_PAGE_SIZE, batchLimit - loadedCount), 0)
+}
 
 /* -------------------- 可复用子组件 -------------------- */
 const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
@@ -242,6 +261,7 @@ const NoteForm = () => {
     },
   })
   const currentTask = getCurrentTask()
+  const hydratedTaskIdRef = useRef<string | null>(null)
   const [previewVideos, setPreviewVideos] = useState<BatchVideo[]>([])
   const [selectedBatchVideoIds, setSelectedBatchVideoIds] = useState<string[]>([])
   const [batchId, setBatchId] = useState<string | null>(null)
@@ -249,6 +269,7 @@ const NoteForm = () => {
   const [batchLoading, setBatchLoading] = useState(false)
   const [previewLoadingMore, setPreviewLoadingMore] = useState(false)
   const [previewPage, setPreviewPage] = useState(0)
+  const [previewOffset, setPreviewOffset] = useState<string | null>(null)
   const [previewHasMore, setPreviewHasMore] = useState(false)
   const [previewSignature, setPreviewSignature] = useState<string | null>(null)
   const [selectedUploader, setSelectedUploader] = useState<FollowingUploader | null>(null)
@@ -257,6 +278,7 @@ const NoteForm = () => {
   const sourceType = useWatch({ control: form.control, name: 'source_type' }) as
     | 'single'
     | 'uploader_batch'
+    | 'dynamics'
   const uploaderSourceMode = useWatch({ control: form.control, name: 'uploader_source_mode' }) as
     | 'manual'
     | 'followings'
@@ -273,7 +295,9 @@ const NoteForm = () => {
   const transcriptOnly = mode === 'transcript'
   const transcriptMode = mode !== 'note'
   const usesModel = mode === 'note' || !!polishTranscript
-  const batchMode = sourceType === 'uploader_batch'
+  const uploaderBatchMode = sourceType === 'uploader_batch'
+  const dynamicsMode = sourceType === 'dynamics'
+  const batchMode = uploaderBatchMode || dynamicsMode
   const editing = currentTask && currentTask.id
   const selectedPreviewVideos = useMemo(
     () => previewVideos.filter(video => selectedBatchVideoIds.includes(video.video_id)),
@@ -282,11 +306,13 @@ const NoteForm = () => {
   const batchRequestSignature = useMemo(
     () =>
       JSON.stringify(
-        uploaderSourceMode === 'followings'
+        dynamicsMode
+          ? { source: 'dynamics', limit: watchedBatchLimit ?? 0 }
+          : uploaderSourceMode === 'followings'
           ? { source: 'followings', mid: selectedUploader?.mid || '', limit: watchedBatchLimit ?? 0 }
           : { source: 'manual', space_url: (watchedVideoUrl || '').trim(), limit: watchedBatchLimit ?? 0 }
       ),
-    [selectedUploader?.mid, uploaderSourceMode, watchedBatchLimit, watchedVideoUrl]
+    [dynamicsMode, selectedUploader?.mid, uploaderSourceMode, watchedBatchLimit, watchedVideoUrl]
   )
   const previewDirty =
     batchMode && previewVideos.length > 0 && previewSignature !== null && previewSignature !== batchRequestSignature
@@ -301,8 +327,15 @@ const NoteForm = () => {
     return
   }, [loadEnabledModels])
   useEffect(() => {
-    if (!currentTask) return
-    const { formData } = currentTask
+    if (!currentTaskId) {
+      hydratedTaskIdRef.current = null
+      return
+    }
+    if (hydratedTaskIdRef.current === currentTaskId) return
+
+    const task = getCurrentTask()
+    if (!task) return
+    const { formData } = task
 
     form.reset({
       platform: formData.platform || 'bilibili',
@@ -329,10 +362,12 @@ const NoteForm = () => {
     setPreviewVideos([])
     setSelectedBatchVideoIds([])
     setPreviewPage(0)
+    setPreviewOffset(null)
     setPreviewHasMore(false)
     setPreviewSignature(null)
     setSelectedUploader(null)
-  }, [currentTask, currentTaskId, form, modelList])
+    hydratedTaskIdRef.current = currentTaskId
+  }, [currentTaskId, form, getCurrentTask, modelList])
 
   /* ---- 帮助函数 ---- */
   const isGenerating = () => {
@@ -366,11 +401,18 @@ const NoteForm = () => {
     const wantsLink = selectedFormats.includes('link')
     const wantsScreenshot =
       values.mode === 'note' && values.video_understanding ? selectedFormats.includes('screenshot') : false
+    const reuseCurrentTask = shouldReuseTaskForSubmission({
+      currentTaskId,
+      currentTask,
+      nextValues: values,
+    })
 
-    if (values.source_type === 'uploader_batch') {
+    if (batchMode) {
       if (previewDirty || previewSignature !== batchRequestSignature || previewVideos.length === 0) {
         toast.error(
-          values.uploader_source_mode === 'followings'
+          values.source_type === 'dynamics'
+            ? '关注动态或视频数已变更，请先重新拉取视频列表'
+            : values.uploader_source_mode === 'followings'
             ? '已选择的 UP 主或视频数已变更，请先重新拉取视频列表'
             : 'UP 主链接或视频数已变更，请先重新拉取视频列表'
         )
@@ -433,7 +475,7 @@ const NoteForm = () => {
       ...values,
       mode: resolvedMode === 'polished_transcript' ? 'transcript' : values.mode,
       provider_id: resolvedMode === 'transcript' ? undefined : selectedModel?.provider_id,
-      task_id: currentTaskId || '',
+      task_id: reuseCurrentTask ? currentTaskId || '' : undefined,
       link: transcriptMode ? false : wantsLink,
       screenshot: transcriptMode ? false : wantsScreenshot,
       video_understanding: transcriptMode ? false : values.video_understanding,
@@ -444,7 +486,7 @@ const NoteForm = () => {
       ...payload,
       mode: resolvedMode,
     }
-    if (currentTaskId) {
+    if (reuseCurrentTask) {
       retryTask(currentTaskId, payload)
       return
     }
@@ -478,6 +520,7 @@ const NoteForm = () => {
     setPreviewVideos([])
     setSelectedBatchVideoIds([])
     setPreviewPage(0)
+    setPreviewOffset(null)
     setPreviewHasMore(false)
     setBatchId(null)
     setBatchStatus(null)
@@ -534,72 +577,104 @@ const NoteForm = () => {
 
   const loadPreviewBatchPage = async (reset: boolean) => {
     const values = form.getValues()
+    const sourceMode = values.uploader_source_mode
+    const dynamicsSource = values.source_type === 'dynamics'
     const valid = await form.trigger(
-      values.uploader_source_mode === 'followings' ? ['batch_limit'] : ['video_url', 'batch_limit']
+      values.source_type === 'uploader_batch' && sourceMode === 'manual'
+        ? ['video_url', 'batch_limit']
+        : ['batch_limit']
     )
     if (!valid) {
-      toast.error(
-        values.uploader_source_mode === 'followings'
-          ? '请先确认最多视频数'
-          : '请先填写有效的 UP 主主页链接'
-      )
+      toast.error(dynamicsSource || sourceMode !== 'manual' ? '请先确认最多视频数' : '请先填写有效的 UP 主主页链接')
       return
     }
-    if (values.uploader_source_mode === 'followings' && !selectedUploader) {
+    if (!dynamicsSource && sourceMode === 'followings' && !selectedUploader) {
       toast.error('请先从关注列表中选择一个 UP 主')
+      return
+    }
+    const effectivePageSize =
+      dynamicsSource
+        ? getDynamicRequestPageSize({
+            batchLimit: values.batch_limit ?? 0,
+            loadedCount: reset ? 0 : previewVideos.length,
+          })
+        : PREVIEW_PAGE_SIZE
+    if (dynamicsSource && effectivePageSize <= 0) {
+      setPreviewHasMore(false)
       return
     }
     const nextPage = reset ? 1 : previewPage + 1
     const setLoadingState = reset ? setBatchLoading : setPreviewLoadingMore
     setLoadingState(true)
     try {
-      const fallbackPayload: UploaderVideoPage = {
+      const uploaderFallbackPayload: UploaderVideoPage = {
         items: [],
         page: nextPage,
         page_size: PREVIEW_PAGE_SIZE,
         has_more: false,
       }
+      const dynamicFallbackPayload: BilibiliDynamicPage = {
+        items: [],
+        offset: '',
+        page_size: effectivePageSize,
+        has_more: false,
+      }
       const payload =
-        values.uploader_source_mode === 'followings'
+        dynamicsSource
+          ? (((await getBilibiliDynamics({
+              offset: reset ? undefined : previewOffset || undefined,
+              page_size: effectivePageSize,
+            })) as BilibiliDynamicPage) || dynamicFallbackPayload)
+          : sourceMode === 'followings'
           ? (((await getBilibiliUploaderVideos({
               mid: selectedUploader?.mid || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
               limit: values.batch_limit ?? 0,
-            })) as UploaderVideoPage) || fallbackPayload)
+            })) as UploaderVideoPage) || uploaderFallbackPayload)
           : (((await previewBatchVideos({
               space_url: values.video_url || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
               limit: values.batch_limit ?? 0,
-            })) as UploaderVideoPage) || fallbackPayload)
+            })) as UploaderVideoPage) || uploaderFallbackPayload)
       const videos = getUniqueBatchVideos(payload.items || [])
-
-      let nextVideos: BatchVideo[] = []
-      setPreviewVideos(current => {
-        nextVideos = reset ? videos : getUniqueBatchVideos([...current, ...videos])
-        return nextVideos
+      const nextPreviewState = getNextBatchPreviewState({
+        currentVideos: previewVideos,
+        currentSelectedIds: selectedBatchVideoIds,
+        incomingVideos: videos,
+        reset,
       })
-      setSelectedBatchVideoIds(current => {
-        return getNextSelectedBatchVideoIds({
-          currentSelectedIds: current,
-          nextVideoIds: nextVideos.map(video => video.video_id),
-          reset,
-        })
-      })
-      setPreviewPage(payload.page)
-      setPreviewHasMore(payload.has_more)
+      setPreviewVideos(nextPreviewState.videos)
+      setSelectedBatchVideoIds(nextPreviewState.selectedIds)
+      if (dynamicsSource) {
+        setPreviewOffset(payload.offset || '')
+      } else {
+        setPreviewPage((payload as UploaderVideoPage).page)
+      }
+      setPreviewHasMore(
+        dynamicsSource
+          ? payload.has_more &&
+              ((values.batch_limit ?? 0) <= 0 ||
+                nextPreviewState.videos.length < (values.batch_limit ?? 0))
+          : payload.has_more
+      )
 
       if (reset) {
         setPreviewSignature(
           JSON.stringify(
-            values.uploader_source_mode === 'followings'
+            dynamicsSource
+              ? { source: 'dynamics', limit: values.batch_limit ?? 0 }
+              : sourceMode === 'followings'
               ? { source: 'followings', mid: selectedUploader?.mid || '', limit: values.batch_limit ?? 0 }
               : { source: 'manual', space_url: (values.video_url || '').trim(), limit: values.batch_limit ?? 0 }
           )
         )
         setBatchId(null)
         setBatchStatus(null)
+        if (!dynamicsSource) {
+          setPreviewOffset(null)
+        }
       }
 
       if (reset && !videos.length) {
@@ -667,10 +742,11 @@ const NoteForm = () => {
                 name="source_type"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       {[
                         { value: 'single', label: '单视频' },
                         { value: 'uploader_batch', label: 'UP 主批量' },
+                        { value: 'dynamics', label: '关注动态' },
                       ].map(option => {
                         const active = field.value === option.value
                         return (
@@ -689,7 +765,7 @@ const NoteForm = () => {
                               field.onChange(option.value)
                               form.setValue('polish_transcript', false)
                               form.setValue('video_url', '')
-                              if (option.value === 'uploader_batch') {
+                              if (option.value === 'uploader_batch' || option.value === 'dynamics') {
                                 form.setValue('platform', 'bilibili')
                                 form.setValue('mode', 'transcript')
                                 form.setValue('uploader_source_mode', 'manual')
@@ -697,7 +773,9 @@ const NoteForm = () => {
                               setPreviewVideos([])
                               setSelectedBatchVideoIds([])
                               setPreviewPage(0)
+                              setPreviewOffset(null)
                               setPreviewHasMore(false)
+                              setBatchId(null)
                               setPreviewSignature(null)
                               setBatchStatus(null)
                               setSelectedUploader(null)
@@ -757,7 +835,7 @@ const NoteForm = () => {
 
           <WorkspaceSection title={batchMode ? '1. 视频来源' : '视频来源'}>
             <div className="space-y-3">
-              {batchMode ? (
+              {uploaderBatchMode ? (
                 <FormField
                   control={form.control}
                   name="uploader_source_mode"
@@ -783,11 +861,12 @@ const NoteForm = () => {
                                 setPreviewVideos([])
                                 setSelectedBatchVideoIds([])
                                 setPreviewPage(0)
+                                setPreviewOffset(null)
                                 setPreviewHasMore(false)
                                 setPreviewSignature(null)
                                 setBatchId(null)
                                 setBatchStatus(null)
-                                if (option.value === 'manual') {
+                                if (option.value !== 'followings') {
                                   setSelectedUploader(null)
                                 }
                               }}
@@ -803,7 +882,11 @@ const NoteForm = () => {
               ) : null}
 
               <div
-                className={batchMode && uploaderSourceMode === 'manual' ? 'grid grid-cols-[minmax(0,1fr)_auto] gap-2' : 'flex gap-2'}
+                className={
+                  uploaderBatchMode && uploaderSourceMode === 'manual'
+                    ? 'grid grid-cols-[minmax(0,1fr)_auto] gap-2'
+                    : 'flex gap-2'
+                }
               >
                 {!batchMode && (
                   <FormField
@@ -841,7 +924,7 @@ const NoteForm = () => {
                     )}
                   />
                 )}
-                {(!batchMode || uploaderSourceMode === 'manual') && (
+                {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
                   <FormField
                     control={form.control}
                     name="video_url"
@@ -849,7 +932,7 @@ const NoteForm = () => {
                       <FormItem className="min-w-0 flex-1">
                         <Input
                           placeholder={
-                            batchMode
+                            uploaderBatchMode
                               ? 'https://space.bilibili.com/123456'
                               : platform === 'local'
                                 ? '请输入本地视频路径'
@@ -868,7 +951,7 @@ const NoteForm = () => {
                     )}
                   />
                 )}
-                {batchMode && uploaderSourceMode === 'manual' && (
+                {uploaderBatchMode && uploaderSourceMode === 'manual' && (
                   <Button
                     type="button"
                     variant="outline"
@@ -917,7 +1000,7 @@ const NoteForm = () => {
                 </div>
               )}
 
-              {batchMode && uploaderSourceMode === 'followings' ? (
+              {uploaderBatchMode && uploaderSourceMode === 'followings' ? (
                 <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
                   <FollowingUploaderPicker
                     selectedMid={selectedUploader?.mid}
@@ -926,6 +1009,7 @@ const NoteForm = () => {
                       setPreviewVideos([])
                       setSelectedBatchVideoIds([])
                       setPreviewPage(0)
+                      setPreviewOffset(null)
                       setPreviewHasMore(false)
                       setPreviewSignature(null)
                       setBatchId(null)
@@ -953,6 +1037,28 @@ const NoteForm = () => {
                       </Button>
                     </div>
                   ) : null}
+                </div>
+              ) : null}
+
+              {dynamicsMode ? (
+                <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-3 text-sm text-neutral-600">
+                    <span>从关注动态里选择投稿视频，再开始批量转写。</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 px-3"
+                      disabled={batchLoading}
+                      onClick={handlePreviewBatch}
+                    >
+                      {batchLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      拉取关注动态
+                    </Button>
+                  </div>
                 </div>
               ) : null}
 
@@ -1018,13 +1124,17 @@ const NoteForm = () => {
                   hasMore={previewHasMore}
                   showPreviewButton={false}
                   emptyMessage={
-                    uploaderSourceMode === 'followings'
+                    dynamicsMode
+                      ? '先拉取关注动态，再从里面选择投稿视频'
+                      : uploaderSourceMode === 'followings'
                       ? '先从关注列表选择一个 UP 主，再拉取视频标题'
                       : '粘贴 UP 主主页后拉取视频标题'
                   }
                   stale={previewDirty}
                   staleMessage={
-                    uploaderSourceMode === 'followings'
+                    dynamicsMode
+                      ? '你修改了最多视频数，当前标题列表不再对应最新条件。'
+                      : uploaderSourceMode === 'followings'
                       ? '你修改了所选 UP 主或最多视频数，当前标题列表不再对应最新条件。'
                       : '你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。'
                   }
@@ -1044,9 +1154,11 @@ const NoteForm = () => {
 
                 {previewVideos.length > 0 && !previewDirty && (
                   <div className="text-xs text-neutral-500">
-                    当前列表已锁定到这次拉取结果。修改
-                    {uploaderSourceMode === 'followings' ? '所选 UP 主' : '链接'}
-                    或视频数后，需要重新拉取才能提交。
+                    {dynamicsMode
+                      ? '当前列表已锁定到这次拉取结果。修改最多视频数后，需要重新拉取才能提交。'
+                      : `当前列表已锁定到这次拉取结果。修改${
+                          uploaderSourceMode === 'followings' ? '所选 UP 主' : '链接'
+                        }或视频数后，需要重新拉取才能提交。`}
                   </div>
                 )}
 

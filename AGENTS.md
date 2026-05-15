@@ -49,7 +49,7 @@ cd BillNote_frontend && pnpm tauri build
 - `events/` (root level) — Blinker signal system for post-processing (e.g., temp file cleanup after transcription)
 
 **Frontend** (`BillNote_frontend/src/`) — React 19 + Vite + Tailwind + shadcn/ui:
-- `pages/HomePage/` — Main note generation UI: `NoteForm.tsx` (input), `MarkdownViewer.tsx` (preview), `MarkmapComponent.tsx` (mind map)
+- `pages/HomePage/` — Main note generation UI: `NoteForm.tsx` (input), `MarkdownViewer.tsx` (preview)
 - `pages/SettingPage/` — LLM provider management, system monitoring, transcriber config
 - `store/` — Zustand stores: `taskStore`, `modelStore`, `configStore`, `providerStore`
 - `services/` — Axios API clients matching backend routes
@@ -57,7 +57,7 @@ cd BillNote_frontend && pnpm tauri build
 - `components/ui/` — shadcn/ui (Radix-based) components
 - Path alias: `@` → `./src`
 
-**Core Workflow**: User submits URL → task queued → download video → extract audio (FFmpeg) → transcribe (Whisper/Groq/etc) → generate notes (LLM) → frontend polls for completion → display Markdown + mind map.
+**Core Workflow**: User submits URL → task queued → download video → extract audio (FFmpeg) → transcribe (Whisper/Groq/etc) → generate notes (LLM) → frontend polls for completion → display Markdown.
 
 ## Key Configuration
 
@@ -66,6 +66,12 @@ cd BillNote_frontend && pnpm tauri build
 - **Database**: SQLite at `backend/app/db/bili_note.db`, auto-initialized on first run
 - **FFmpeg**: Required system dependency for video/audio processing
 - **Vite proxy**: Dev server proxies `/api` and `/static` to backend (configured in `vite.config.ts`, reads env from parent dir)
+
+## Agent Workflow Preferences
+
+- **Prefer local-first debugging and testing**: When investigating frontend or backend issues, use local terminal commands, repo scripts, direct HTTP requests, and browser automation that runs from the repository first.
+- **Avoid MCP unless necessary**: If the task can be completed reliably without MCP, do not use MCP. Only use MCP when local tooling cannot reach the required surface, or when the user explicitly asks for it.
+- **Frontend smoke tests**: For UI interaction bugs, prefer adding or running a local smoke test before guessing. See `docs/runbooks/frontend-smoke-debugging.md` for the recommended workflow.
 
 ## Code Style
 

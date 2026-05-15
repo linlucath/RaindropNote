@@ -114,7 +114,7 @@ fn load_env_overrides(exe_path: &Path) -> HashMap<String, String> {
     for path in candidate_env_files(exe_path) {
         if let Ok(vars) = parse_env_file(&path) {
             for (key, value) in vars {
-                merged.insert(key, value);
+                merged.entry(key).or_insert(value);
             }
         }
     }
@@ -136,19 +136,30 @@ fn candidate_env_files(exe_path: &Path) -> Vec<PathBuf> {
 }
 
 fn push_env_candidates(files: &mut Vec<PathBuf>, start: &Path) {
+    if let Some(repo_root) = find_repo_root(start) {
+        push_unique_env_file(files, repo_root.join(".env"));
+        return;
+    }
+
+    push_unique_env_file(files, start.join(".env"));
+}
+
+fn find_repo_root(start: &Path) -> Option<PathBuf> {
     let mut current = Some(start.to_path_buf());
-    let mut depth = 0;
 
     while let Some(dir) = current {
-        let env_path = dir.join(".env");
-        if env_path.exists() && !files.contains(&env_path) {
-            files.push(env_path);
-        }
-        depth += 1;
-        if depth >= 6 {
-            break;
+        if dir.join("backend").is_dir() && dir.join("BillNote_frontend").is_dir() {
+            return Some(dir);
         }
         current = dir.parent().map(|parent| parent.to_path_buf());
+    }
+
+    None
+}
+
+fn push_unique_env_file(files: &mut Vec<PathBuf>, env_path: PathBuf) {
+    if env_path.exists() && !files.contains(&env_path) {
+        files.push(env_path);
     }
 }
 
@@ -367,4 +378,40 @@ async fn update_sidecar_environment(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::push_env_candidates;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir() -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("bilinote-env-tests-{suffix}"))
+    }
+
+    #[test]
+    fn push_env_candidates_stops_at_repo_root_instead_of_including_home_env() {
+        let root = unique_temp_dir();
+        let home = root.join("home");
+        let project = home.join("BiliNote");
+        let start = project.join("BillNote_frontend").join("src-tauri");
+
+        fs::create_dir_all(project.join("backend")).unwrap();
+        fs::create_dir_all(&start).unwrap();
+        fs::write(home.join(".env"), "HOME_KEY=1\n").unwrap();
+        fs::write(project.join(".env"), "PROJECT_KEY=1\n").unwrap();
+
+        let mut files = Vec::new();
+        push_env_candidates(&mut files, &start);
+
+        assert_eq!(files, vec![project.join(".env")]);
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

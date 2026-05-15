@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
+import { Copy, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -27,9 +27,8 @@ interface NoteHeaderProps {
   onCopy: () => void
   onDownload: () => void
   createAt?: string | Date
+  showTranscribe: boolean
   setShowTranscribe: (show: boolean) => void
-  showChat?: false | 'half' | 'full'
-  setShowChat?: (mode: false | 'half' | 'full') => void
 }
 
 export function MarkdownHeader({
@@ -45,10 +44,6 @@ export function MarkdownHeader({
   createAt,
   showTranscribe,
   setShowTranscribe,
-  showChat,
-  setShowChat,
-  viewMode,
-  setViewMode,
 }: NoteHeaderProps) {
   const [copied, setCopied] = useState(false)
 
@@ -66,10 +61,6 @@ export function MarkdownHeader({
   }
 
   const styleName = noteStyles.find(v => v.value === style)?.label || style
-
-  const reversedMarkdown: VersionNote[] = Array.isArray(currentTask?.markdown)
-    ? [...currentTask!.markdown].reverse()
-    : []
 
   const formatDate = (date: string | Date | undefined) => {
     if (!date) return ''
@@ -131,24 +122,6 @@ export function MarkdownHeader({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                onClick={() => {
-                  setViewMode(viewMode == 'preview' ? 'map' : 'preview')
-                }}
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-              >
-                <BrainCircuit className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{viewMode == 'preview' ? '思维导图' : 'markdown'}</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>思维导图</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
               <Button onClick={handleCopy} variant="ghost" size="sm" className="h-8 px-2">
                 <Copy className="mr-1.5 h-4 w-4" />
                 <span className="text-sm">{copied ? '已复制' : '复制'}</span>
@@ -187,24 +160,6 @@ export function MarkdownHeader({
             <TooltipContent>原文参照</TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        {setShowChat && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={() => setShowChat(showChat ? false : 'half')}
-                  variant={showChat ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-8 px-2"
-                >
-                  <MessageSquare className="mr-1.5 h-4 w-4" />
-                  <span className="text-sm">AI 问答</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>基于笔记内容的 AI 问答</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
       </div>
     </div>
   )

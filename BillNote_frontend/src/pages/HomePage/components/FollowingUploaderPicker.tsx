@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
-import { AlertCircle, Loader2, RefreshCw, Search, UserRound } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, UserRound } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { Button } from '@/components/ui/button.tsx'
-import { Input } from '@/components/ui/input.tsx'
 import { getDownloaderCookie } from '@/services/downloader.ts'
 import {
   FollowingUploader,
@@ -29,8 +28,6 @@ export default function FollowingUploaderPicker({
   const [configured, setConfigured] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [keywordInput, setKeywordInput] = useState('')
-  const [keyword, setKeyword] = useState('')
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
   const [items, setItems] = useState<FollowingUploader[]>([])
@@ -58,11 +55,10 @@ export default function FollowingUploaderPicker({
   const emptyMessage = useMemo(() => {
     if (error) return error
     if (configured === false) return '请先到设置页填写 Bilibili Cookie'
-    if (items.length === 0 && keyword) return '没有找到匹配的关注 UP 主'
     return '当前账号暂无可读取的关注 UP 主'
-  }, [configured, error, items.length, keyword])
+  }, [configured, error])
 
-  const loadFollowings = async (nextPage: number, reset = false, nextKeyword = keyword) => {
+  const loadFollowings = async (nextPage: number, reset = false) => {
     const setter = reset ? setLoading : setLoadingMore
     setter(true)
     setError('')
@@ -70,7 +66,6 @@ export default function FollowingUploaderPicker({
       const data = (await getBilibiliFollowings({
         page: nextPage,
         page_size: DEFAULT_PAGE_SIZE,
-        keyword: nextKeyword || undefined,
       })) as FollowingUploaderPage
       setItems(current => (reset ? data.items : [...current, ...data.items]))
       setPage(data.page)
@@ -88,12 +83,6 @@ export default function FollowingUploaderPicker({
 
   const handleRefresh = async () => {
     await loadFollowings(1, true)
-  }
-
-  const handleSearch = async () => {
-    const nextKeyword = keywordInput.trim()
-    setKeyword(nextKeyword)
-    await loadFollowings(1, true, nextKeyword)
   }
 
   const handleLoadMore = async () => {
@@ -121,22 +110,7 @@ export default function FollowingUploaderPicker({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
-        <Input
-          value={keywordInput}
-          placeholder="按昵称搜索关注的 UP 主"
-          onChange={event => setKeywordInput(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              void handleSearch()
-            }
-          }}
-        />
-        <Button type="button" variant="outline" className="h-10 px-3" onClick={() => void handleSearch()}>
-          <Search className="mr-2 h-4 w-4" />
-          搜索
-        </Button>
+      <div className="flex justify-end">
         <Button
           type="button"
           variant="outline"
@@ -144,7 +118,11 @@ export default function FollowingUploaderPicker({
           disabled={loading || configured === false}
           onClick={() => void handleRefresh()}
         >
-          {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+          {loading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 h-4 w-4" />
+          )}
           拉取关注列表
         </Button>
       </div>
@@ -158,7 +136,11 @@ export default function FollowingUploaderPicker({
 
       {items.length === 0 ? (
         <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-neutral-200 bg-neutral-50/50 px-4 py-6 text-center">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin text-neutral-400" /> : <UserRound className="h-4 w-4 text-neutral-400" />}
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
+          ) : (
+            <UserRound className="h-4 w-4 text-neutral-400" />
+          )}
           <span className="text-sm text-neutral-500">{emptyMessage}</span>
         </div>
       ) : (
@@ -182,13 +164,9 @@ export default function FollowingUploaderPicker({
                   }}
                   onKeyDown={event => handleUploaderItemKeyDown(event, item)}
                 >
-                  {item.face ? (
-                    <img src={item.face} alt={item.name} className="h-10 w-10 rounded-full object-cover" />
-                  ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-400">
-                      <UserRound className="h-4 w-4" />
-                    </div>
-                  )}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-400">
+                    <UserRound className="h-4 w-4" />
+                  </div>
                   <span className="min-w-0">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium text-neutral-900">{item.name}</span>

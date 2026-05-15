@@ -23,9 +23,12 @@ from app.gpt.prompt import (
 from app.gpt.utils import fix_markdown
 from app.gpt.request_chunker import RequestChunker
 from app.models.transcriber_model import TranscriptSegment
+from app.utils.logger import get_logger
 from datetime import timedelta
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+logger = get_logger(__name__)
 
 
 class UniversalGPT(GPT):
@@ -77,29 +80,93 @@ class UniversalGPT(GPT):
     def _llm_cache_path(self, cache_key: str) -> Path:
         return self.llm_cache_dir / f"{cache_key}.json"
 
+    @staticmethod
+    def _cache_key_preview(cache_key: str) -> str:
+        return cache_key[:12]
+
+    def _summarize_messages(self, messages: list) -> str:
+        parts = []
+        for message in messages:
+            role = message.get("role", "unknown")
+            content = message.get("content")
+            if isinstance(content, list):
+                text_chars = sum(
+                    len(item.get("text", ""))
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
+                image_count = sum(
+                    1
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "image_url"
+                )
+                parts.append(f"{role}:parts={len(content)},text_chars={text_chars},images={image_count}")
+            elif isinstance(content, str):
+                parts.append(f"{role}:chars={len(content)}")
+            else:
+                parts.append(f"{role}:type={type(content).__name__}")
+        return "; ".join(parts)
+
     def _load_llm_cache(self, cache_key: str):
         if not self.llm_cache_enabled:
+            logger.info(
+                "LLM cache bypassed: reason=disabled key=%s model=%s provider=%s",
+                self._cache_key_preview(cache_key),
+                self.model,
+                self._cache_provider_base_url(),
+            )
             return None
 
         path = self._llm_cache_path(cache_key)
         if not path.exists():
+            logger.info(
+                "LLM cache miss: reason=not_found key=%s path=%s",
+                self._cache_key_preview(cache_key),
+                path,
+            )
             return None
 
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "LLM cache invalid_json: key=%s path=%s error=%s; removing cache file",
+                self._cache_key_preview(cache_key),
+                path,
+                exc,
+            )
             path.unlink(missing_ok=True)
             return None
 
         content = payload.get("content")
         if not isinstance(content, str):
+            logger.warning(
+                "LLM cache invalid_payload: key=%s path=%s content_type=%s; removing cache file",
+                self._cache_key_preview(cache_key),
+                path,
+                type(content).__name__,
+            )
             path.unlink(missing_ok=True)
             return None
 
+        logger.info(
+            "LLM cache hit: key=%s path=%s content_chars=%d",
+            self._cache_key_preview(cache_key),
+            path,
+            len(content),
+        )
         return self._build_cached_response(content)
 
     def _save_llm_cache(self, cache_key: str, content: str) -> None:
-        if not self.llm_cache_enabled or not isinstance(content, str) or not content.strip():
+        if not self.llm_cache_enabled:
+            return
+
+        if not isinstance(content, str) or not content.strip():
+            logger.info(
+                "LLM cache skip_save: key=%s reason=empty_or_non_string content_type=%s",
+                self._cache_key_preview(cache_key),
+                type(content).__name__,
+            )
             return
 
         self.llm_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -115,6 +182,12 @@ class UniversalGPT(GPT):
         tmp_path = path.with_suffix(".tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(path)
+        logger.info(
+            "LLM cache saved: key=%s path=%s content_chars=%d",
+            self._cache_key_preview(cache_key),
+            path,
+            len(content),
+        )
 
     def _format_time(self, seconds: float) -> str:
         return str(timedelta(seconds=int(seconds)))[2:]
@@ -436,6 +509,16 @@ class UniversalGPT(GPT):
 
     def _chat_completion_create(self, messages: list):
         cache_key = self._llm_cache_key(messages)
+        logger.info(
+            "LLM request start: key=%s model=%s provider=%s temperature=%s cache_enabled=%s approx_bytes=%d messages=%s",
+            self._cache_key_preview(cache_key),
+            self.model,
+            self._cache_provider_base_url(),
+            self.temperature,
+            self.llm_cache_enabled,
+            self._estimate_messages_bytes(messages),
+            self._summarize_messages(messages),
+        )
         cached_response = self._load_llm_cache(cache_key)
         if cached_response is not None:
             return cached_response
@@ -443,19 +526,47 @@ class UniversalGPT(GPT):
         last_exc = None
         for attempt in range(self._max_retry_attempts):
             try:
+                logger.info(
+                    "LLM provider request: key=%s attempt=%d/%d",
+                    self._cache_key_preview(cache_key),
+                    attempt + 1,
+                    self._max_retry_attempts,
+                )
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     temperature=self.temperature
                 )
                 content = response.choices[0].message.content or ""
+                logger.info(
+                    "LLM provider response: key=%s attempt=%d content_chars=%d",
+                    self._cache_key_preview(cache_key),
+                    attempt + 1,
+                    len(content),
+                )
                 self._save_llm_cache(cache_key, content)
                 return response
             except Exception as exc:
                 last_exc = exc
                 if attempt == self._max_retry_attempts - 1 or not self._is_retryable_error(exc):
+                    logger.error(
+                        "LLM provider failed: key=%s attempt=%d/%d retryable=%s error=%s",
+                        self._cache_key_preview(cache_key),
+                        attempt + 1,
+                        self._max_retry_attempts,
+                        self._is_retryable_error(exc),
+                        exc,
+                    )
                     raise
                 sleep_seconds = self._retry_base_backoff * (2 ** attempt)
+                logger.warning(
+                    "LLM provider retrying: key=%s attempt=%d/%d backoff_seconds=%.2f error=%s",
+                    self._cache_key_preview(cache_key),
+                    attempt + 1,
+                    self._max_retry_attempts,
+                    sleep_seconds,
+                    exc,
+                )
                 time.sleep(sleep_seconds)
 
         if last_exc is not None:

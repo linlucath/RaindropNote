@@ -37,6 +37,10 @@ export interface BatchVideoPreviewProps {
 }
 
 const getVideoTitle = (video: BatchVideo) => video.title?.trim() || video.video_url
+const getVideoMeta = (video: BatchVideo) => {
+  const authorName = video.author_name?.trim()
+  return authorName ? authorName : ''
+}
 
 export default function BatchVideoPreview({
   videos,
@@ -237,6 +241,9 @@ export default function BatchVideoPreview({
                         </Button>
                       ) : null}
                     </span>
+                    {getVideoMeta(video) ? (
+                      <span className="mt-1 block text-xs text-neutral-500">{getVideoMeta(video)}</span>
+                    ) : null}
                     {statusItem ? (
                       <span className="mt-1.5 flex min-w-0 items-center gap-2 text-xs text-neutral-500">
                         <Badge

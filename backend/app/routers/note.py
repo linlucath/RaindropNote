@@ -33,8 +33,9 @@ router = APIRouter()
 
 
 class RecordRequest(BaseModel):
-    video_id: str
-    platform: str
+    task_id: Optional[str] = None
+    video_id: Optional[str] = None
+    platform: Optional[str] = None
 
 
 class CancelTaskRequest(BaseModel):
@@ -127,6 +128,55 @@ def list_saved_tasks():
     return sorted(tasks, key=lambda task: task["created_at"], reverse=True)
 
 
+def _extract_result_audio_meta(result_path: Path) -> dict:
+    try:
+        with result_path.open("r", encoding="utf-8") as f:
+            result_content = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"读取笔记结果失败，跳过 {result_path}: {e}")
+        return {}
+
+    return result_content.get("audio_meta") or result_content.get("audioMeta") or {}
+
+
+def _resolve_task_ids_for_delete(data: RecordRequest, output_dir: Path) -> list[str]:
+    if data.task_id:
+        return [data.task_id]
+
+    if not data.video_id or not data.platform or not output_dir.exists():
+        return []
+
+    matched_task_ids = []
+    for result_path in output_dir.glob("*.json"):
+        if not _is_note_result_file(result_path):
+            continue
+
+        audio_meta = _extract_result_audio_meta(result_path)
+        if audio_meta.get("video_id") == data.video_id and audio_meta.get("platform") == data.platform:
+            matched_task_ids.append(result_path.stem)
+
+    return matched_task_ids
+
+
+def _delete_task_artifacts(task_id: str, output_dir: Path) -> int:
+    deleted_files = 0
+    artifact_paths = [
+        output_dir / f"{task_id}.json",
+        output_dir / f"{task_id}.status.json",
+        output_dir / f"{task_id}_audio.json",
+        output_dir / f"{task_id}_transcript.json",
+        output_dir / f"{task_id}_markdown.md",
+    ]
+
+    for artifact_path in artifact_paths:
+        if not artifact_path.exists():
+            continue
+        artifact_path.unlink()
+        deleted_files += 1
+
+    return deleted_files
+
+
 def save_note_to_file(task_id: str, note):
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
     with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
@@ -170,20 +220,25 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
         return
     save_note_to_file(task_id, note)
 
-    # 自动建立向量索引（用于 AI 问答），失败不影响笔记生成
-    try:
-        from app.services.vector_store import VectorStoreManager
-        VectorStoreManager().index_task(task_id)
-    except Exception as e:
-        logger.warning(f"向量索引失败（不影响笔记）: {e}")
-
-
 @router.post('/delete_task')
 def delete_task(data: RecordRequest):
     try:
-        # TODO: 待持久化完成
-        # NoteGenerator().delete_note(video_id=data.video_id, platform=data.platform)
-        return R.success(msg='删除成功')
+        output_dir = Path(NOTE_OUTPUT_DIR)
+        task_ids = _resolve_task_ids_for_delete(data, output_dir)
+        deleted_files = sum(_delete_task_artifacts(task_id, output_dir) for task_id in task_ids)
+        deleted_records = NoteGenerator.delete_note(
+            video_id=data.video_id,
+            platform=data.platform,
+            task_id=data.task_id,
+        )
+        return R.success(
+            data={
+                'task_ids': task_ids,
+                'deleted_files': deleted_files,
+                'deleted_records': deleted_records,
+            },
+            msg='删除成功',
+        )
     except Exception as e:
         return R.error(msg=e)
 
@@ -217,6 +272,9 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             # 如果传了task_id，说明是重试！
             task_id = data.task_id
             logger.info(f"重试模式，复用已有 task_id={task_id}")
+            deleted_files = _delete_task_artifacts(task_id, Path(NOTE_OUTPUT_DIR))
+            if deleted_files:
+                logger.info(f"重试前已清理旧任务产物 {deleted_files} 个 (task_id={task_id})")
         else:
             # 正常新建任务
             task_id = str(uuid.uuid4())
