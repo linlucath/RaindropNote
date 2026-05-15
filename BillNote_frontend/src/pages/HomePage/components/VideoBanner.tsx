@@ -17,46 +17,14 @@ const platformLabel: Record<string, string> = {
 export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
   if (!audioMeta) return null
 
-  const rawCover = audioMeta.cover_url
-  // 通过后端代理加载封面，避免跨域/Referrer 限制
-  const apiBase = String(import.meta.env.VITE_API_BASE_URL || 'api').replace(/\/$/, '')
-  const coverUrl = rawCover
-    ? `${apiBase}/image_proxy?url=${encodeURIComponent(rawCover)}`
-    : ''
   const title = audioMeta.title
   const uploader = audioMeta.raw_info?.uploader || ''
   const platform = platformLabel[audioMeta.platform] || audioMeta.platform || ''
   const originalUrl = videoUrl || audioMeta.raw_info?.webpage_url || ''
 
   return (
-    <div className="relative mb-4 overflow-hidden rounded-lg">
-      {/* 模糊背景封面 */}
-      <div className="absolute inset-0">
-        {coverUrl ? (
-          <img
-            src={coverUrl}
-            alt=""
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-cover blur-md brightness-[0.4] scale-110"
-          />
-        ) : (
-          <div className="h-full w-full bg-gradient-to-r from-blue-600 to-indigo-700" />
-        )}
-      </div>
-
-      {/* 内容层 */}
-      <div className="relative flex items-center gap-4 px-5 py-4">
-        {/* 封面缩略图 */}
-        {coverUrl && (
-          <img
-            src={coverUrl}
-            alt={title}
-            referrerPolicy="no-referrer"
-            className="h-16 w-28 shrink-0 rounded-md object-cover shadow-md"
-          />
-        )}
-
-        {/* 文字信息 */}
+    <div className="mb-4 overflow-hidden rounded-lg border border-neutral-200 bg-linear-to-r from-slate-900 via-slate-800 to-slate-900">
+      <div className="flex items-center gap-4 px-5 py-4">
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-base font-bold text-white" title={title}>
             {title}
@@ -68,7 +36,6 @@ export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {
           </div>
         </div>
 
-        {/* 跳转原视频 */}
         {originalUrl && (
           <a
             href={originalUrl}

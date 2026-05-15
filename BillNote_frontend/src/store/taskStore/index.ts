@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware'
 import { delete_task, generateNote, GenerationMode, RuntimeTaskStatus } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
+import { buildPersistedTaskState } from './persistTaskState.ts'
+import { buildSyncedTasksState } from './syncSavedTasks.ts'
 
 
 export type TaskStatus = RuntimeTaskStatus | 'RUNNING' | 'FAILD'
@@ -208,88 +210,11 @@ export const useTaskStore = create<TaskStore>()(
 
       syncSavedTasks: savedTasks =>
         set(state => {
-          const restoredTasks = savedTasks
-            .map(item => {
-              const result = item?.result || {}
-              const audioMeta = result.audio_meta || result.audioMeta || {}
-              const rawInfo = audioMeta.raw_info || {}
-              const platform = audioMeta.platform || item?.platform || ''
-              const videoUrl =
-                rawInfo.webpage_url ||
-                rawInfo.original_url ||
-                rawInfo.url ||
-                ''
-              const markdown = String(result.markdown || '')
-              const isPolishedTranscript = markdown.includes('## 校对文字稿')
-              const isTranscript = isPolishedTranscript || markdown.includes('## 简体中文文字稿')
-              const mode: GenerationMode = isTranscript ? 'transcript' : 'note'
-
-              if (!item?.task_id || !result.markdown) return null
-
-              return {
-                id: item.task_id,
-                status: item.status || 'SUCCESS',
-                markdown: result.markdown,
-                transcript: result.transcript || {
-                  full_text: '',
-                  language: '',
-                  raw: null,
-                  segments: [],
-                },
-                platform,
-                createdAt: item.created_at
-                  ? new Date(item.created_at * 1000).toISOString()
-                  : new Date().toISOString(),
-                audioMeta: {
-                  cover_url: '',
-                  duration: 0,
-                  file_path: '',
-                  platform,
-                  raw_info: null,
-                  title: '',
-                  video_id: '',
-                  ...audioMeta,
-                },
-                formData: {
-                  video_url: videoUrl,
-                  link: true,
-                  screenshot: false,
-                  platform,
-                  quality: 'fast',
-                  model_name: result.model_name || '',
-                  provider_id: '',
-                  style: result.style || '',
-                  mode,
-                  polish_transcript: isPolishedTranscript,
-                },
-              } as Task
-            })
-            .filter(Boolean) as Task[]
-
-          const restoredById = new Map(restoredTasks.map(task => [task.id, task]))
-          const mergedExisting = state.tasks.map(task => {
-            const restored = restoredById.get(task.id)
-            if (!restored) return task
-            restoredById.delete(task.id)
-            return {
-              ...task,
-              ...restored,
-              formData: {
-                ...task.formData,
-                ...restored.formData,
-              },
-            }
+          return buildSyncedTasksState({
+            savedTasks,
+            existingTasks: state.tasks,
+            currentTaskId: state.currentTaskId,
           })
-          const tasks = [...restoredById.values(), ...mergedExisting]
-          const nextCurrentTaskId =
-            state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
-              ? state.currentTaskId
-              : null
-
-          return {
-            tasks,
-            currentTaskId: nextCurrentTaskId,
-          }
         }),
 
 
@@ -297,14 +222,19 @@ export const useTaskStore = create<TaskStore>()(
         const task = get().tasks.find(t => t.id === id)
 
         // 更新 Zustand 状态
-        set(state => ({
-          tasks: state.tasks.filter(task => task.id !== id),
-          currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
-        }))
+        try {
+          set(state => ({
+            tasks: state.tasks.filter(task => task.id !== id),
+            currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
+          }))
+        } catch (error) {
+          console.warn('删除任务时写入本地缓存失败，将继续调用后端删除接口', error)
+        }
 
         // 调用后端删除接口（如果找到了任务）
         if (task) {
           await delete_task({
+            task_id: id,
             video_id: task.audioMeta.video_id,
             platform: task.platform,
           })
@@ -317,6 +247,7 @@ export const useTaskStore = create<TaskStore>()(
     }),
     {
       name: 'task-storage',
+      partialize: state => buildPersistedTaskState(state),
     }
   )
 )

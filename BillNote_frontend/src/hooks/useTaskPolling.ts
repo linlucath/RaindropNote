@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useTaskStore } from '@/store/taskStore'
 import { generateNote, get_task_status, TERMINAL_TASK_STATUSES } from '@/services/note.ts'
 import toast from 'react-hot-toast'
-
-const AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE = '需要确认音频转写'
+import { getTaskPollingErrorResolution } from './taskPollingErrorHandling.ts'
 
 export const useTaskPolling = (interval = 3000) => {
   const tasks = useTaskStore(state => state.tasks)
@@ -55,13 +54,27 @@ export const useTaskPolling = (interval = 3000) => {
             typeof e === 'object' && e
               ? String(('msg' in e && e.msg) || ('message' in e && e.message) || '')
               : ''
-          if (
-            message.includes(AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE) &&
-            !task.formData?.allow_audio_transcription
-          ) {
+          const errorCode =
+            typeof e === 'object' && e && 'code' in e && typeof e.code === 'number'
+              ? e.code
+              : undefined
+          const initialResolution = getTaskPollingErrorResolution({
+            errorCode,
+            message,
+            allowAudioTranscription: task.formData?.allow_audio_transcription,
+          })
+
+          if (initialResolution.shouldAskAudioTranscription) {
             const confirmed = window.confirm(
               '没有找到可用字幕文件。是否允许下载音频并进行转写？'
             )
+            const resolution = getTaskPollingErrorResolution({
+              errorCode,
+              message,
+              allowAudioTranscription: task.formData?.allow_audio_transcription,
+              audioTranscriptionConfirmed: confirmed,
+            })
+
             if (confirmed) {
               const formData = {
                 ...task.formData,
@@ -77,6 +90,15 @@ export const useTaskPolling = (interval = 3000) => {
               })
               continue
             }
+
+            if (resolution.shouldMarkFailed) {
+              updateTaskContent(task.id, { status: 'FAILED' })
+              continue
+            }
+          }
+
+          if (initialResolution.shouldMarkFailed) {
+            updateTaskContent(task.id, { status: 'FAILED' })
           }
           // Keep polling on transient request errors. A task should only become FAILED
           // when the backend explicitly reports FAILED, not when one poll request flakes.

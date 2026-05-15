@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  getNextBatchPreviewState,
   getNextSelectedBatchVideoIds,
   getUniqueBatchVideos,
   shouldToggleVideoItemFromKeydown,
@@ -76,4 +77,43 @@ test('loading more deduplicates videos by video_id while preserving first occurr
       { video_id: 'video-2', video_url: 'https://example.com/2', title: 'Two' },
     ]
   )
+})
+
+test('building reset preview state returns incoming videos without relying on React updater ordering', () => {
+  const nextState = getNextBatchPreviewState({
+    currentVideos: [{ video_id: 'old', video_url: 'https://example.com/old', title: 'Old' }],
+    currentSelectedIds: ['old'],
+    incomingVideos: [
+      { video_id: 'video-1', video_url: 'https://example.com/1', title: 'One' },
+      { video_id: 'video-2', video_url: 'https://example.com/2', title: 'Two' },
+    ],
+    reset: true,
+  })
+
+  assert.deepEqual(
+    nextState.videos.map(video => video.video_id),
+    ['video-1', 'video-2']
+  )
+  assert.deepEqual(nextState.selectedIds, [])
+})
+
+test('building load-more preview state preserves valid selections against the merged video list', () => {
+  const nextState = getNextBatchPreviewState({
+    currentVideos: [
+      { video_id: 'video-1', video_url: 'https://example.com/1', title: 'One' },
+      { video_id: 'video-2', video_url: 'https://example.com/2', title: 'Two' },
+    ],
+    currentSelectedIds: ['video-2', 'missing-video'],
+    incomingVideos: [
+      { video_id: 'video-2', video_url: 'https://example.com/2b', title: 'Two Duplicate' },
+      { video_id: 'video-3', video_url: 'https://example.com/3', title: 'Three' },
+    ],
+    reset: false,
+  })
+
+  assert.deepEqual(
+    nextState.videos.map(video => video.video_id),
+    ['video-1', 'video-2', 'video-3']
+  )
+  assert.deepEqual(nextState.selectedIds, ['video-2'])
 })

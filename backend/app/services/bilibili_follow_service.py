@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -45,11 +45,10 @@ class BilibiliFollowService:
         return {
             'mid': str(item.get('mid') or ''),
             'name': item.get('uname') or item.get('name') or '',
-            'face': item.get('face') or '',
             'sign': item.get('sign') or '',
         }
 
-    def get_followings(self, page: int, page_size: int, keyword: Optional[str] = None) -> dict[str, Any]:
+    def get_followings(self, page: int, page_size: int) -> dict[str, Any]:
         cookie = self._get_cookie()
         mid = self._get_self_mid(cookie)
         params = {
@@ -75,13 +74,7 @@ class BilibiliFollowService:
         data = payload.get('data') or {}
         raw_items = data.get('list') or []
         items = [self._normalize_following_item(item) for item in raw_items]
-        normalized_keyword = (keyword or '').strip().lower()
-        if normalized_keyword:
-            items = [item for item in items if normalized_keyword in item['name'].lower()]
-
         total = data.get('total')
-        if normalized_keyword:
-            total = len(items)
 
         return {
             'items': items,

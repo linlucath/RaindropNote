@@ -1,9 +1,16 @@
 import unittest
+import json
+import tempfile
+from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import HTTPException
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch
 
 from app.enmus.note_enums import DownloadQuality
 from app.models.notes_model import NoteResult
+from app.routers import note as note_router
 from app.routers.note import run_note_task
 
 
@@ -13,9 +20,7 @@ class TestNoteRouter(unittest.TestCase):
 
         with patch("app.routers.note.NoteGenerator") as generator_cls, patch(
             "app.routers.note.save_note_to_file"
-        ), patch("app.routers.note.task_serial_executor.run", side_effect=lambda fn: fn()), patch(
-            "app.services.vector_store.VectorStoreManager.index_task"
-        ):
+        ), patch("app.routers.note.task_serial_executor.run", side_effect=lambda fn: fn()):
             generator_cls.return_value.generate = Mock(return_value=fake_note)
 
             with self.assertRaises(HTTPException) as ctx:
@@ -35,9 +40,7 @@ class TestNoteRouter(unittest.TestCase):
 
         with patch("app.routers.note.NoteGenerator") as generator_cls, patch(
             "app.routers.note.save_note_to_file"
-        ), patch("app.routers.note.task_serial_executor.run", side_effect=lambda fn: fn()), patch(
-            "app.services.vector_store.VectorStoreManager.index_task"
-        ):
+        ), patch("app.routers.note.task_serial_executor.run", side_effect=lambda fn: fn()):
             generator_cls.return_value.generate = Mock(return_value=fake_note)
 
             run_note_task(
@@ -49,6 +52,93 @@ class TestNoteRouter(unittest.TestCase):
             )
 
         generator_cls.return_value.generate.assert_called_once()
+
+    def test_delete_task_removes_saved_task_from_refreshed_task_list(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            (output_dir / 'task-1.json').write_text(
+                json.dumps(
+                    {
+                        'markdown': '# test',
+                        'audio_meta': {
+                            'video_id': 'BV1xx',
+                            'platform': 'bilibili',
+                            'title': '测试视频',
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding='utf-8',
+            )
+
+            original_router_output_dir = note_router.NOTE_OUTPUT_DIR
+            try:
+                note_router.NOTE_OUTPUT_DIR = str(output_dir)
+                client = TestClient(app)
+
+                delete_response = client.post(
+                    '/api/delete_task',
+                    json={'task_id': 'task-1', 'video_id': 'BV1xx', 'platform': 'bilibili'},
+                )
+                list_response = client.get('/api/task_list')
+            finally:
+                note_router.NOTE_OUTPUT_DIR = original_router_output_dir
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()['code'], 0)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.json()['data']['tasks'], [])
+
+    def test_delete_task_by_task_id_keeps_other_records_for_same_video(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            for task_id in ('task-1', 'task-2'):
+                (output_dir / f'{task_id}.json').write_text(
+                    json.dumps(
+                        {
+                            'markdown': f'# {task_id}',
+                            'audio_meta': {
+                                'video_id': 'BV1same',
+                                'platform': 'bilibili',
+                                'title': f'测试视频 {task_id}',
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding='utf-8',
+                )
+
+            original_router_output_dir = note_router.NOTE_OUTPUT_DIR
+            try:
+                note_router.NOTE_OUTPUT_DIR = str(output_dir)
+                client = TestClient(app)
+
+                delete_response = client.post(
+                    '/api/delete_task',
+                    json={'task_id': 'task-1', 'video_id': 'BV1same', 'platform': 'bilibili'},
+                )
+                list_response = client.get('/api/task_list')
+            finally:
+                note_router.NOTE_OUTPUT_DIR = original_router_output_dir
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()['code'], 0)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual([task['task_id'] for task in list_response.json()['data']['tasks']], ['task-2'])
 
 
 if __name__ == "__main__":

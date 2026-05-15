@@ -12,3 +12,13 @@ test('FollowingUploaderPicker avoids native buttons for uploader rows', () => {
   assert.match(source, /role="button"/)
   assert.match(source, /if \(selected\) \{\s*return\s*\}/)
 })
+
+test('FollowingUploaderPicker no longer exposes uploader search controls', () => {
+  assert.doesNotMatch(source, /按昵称搜索关注的 UP 主/)
+  assert.doesNotMatch(source, />\s*搜索\s*</)
+})
+
+test('FollowingUploaderPicker no longer renders remote uploader avatars', () => {
+  assert.doesNotMatch(source, /item\.face/)
+  assert.doesNotMatch(source, /<img/)
+})

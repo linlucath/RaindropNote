@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, memo, FC } from 'react'
+import { useState, useEffect, useMemo, memo, FC } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
 import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
@@ -21,8 +21,6 @@ import { useTaskStore } from '@/store/taskStore'
 import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
-import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
-import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 
 interface VersionNote {
@@ -282,9 +280,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const retryTask = useTaskStore.getState().retryTask
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const [showTranscribe, setShowTranscribe] = useState(false)
-  const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
-  const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
-  const svgRef = useRef<SVGSVGElement>(null)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
@@ -329,33 +324,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     } catch (e) {
       toast.error('复制失败')
     }
-  }
-  const alertButton = {
-    id: 'alert',
-    title: '测试警告',
-    content: '⚠️',
-    onClick: () => alert('你点击了自定义按钮！'),
-  }
-  const exportButton = {
-    id: 'export',
-    title: '导出思维导图',
-    content: '⤓',
-    onClick: () => {
-      const svgEl = svgRef.current
-      if (!svgEl) return
-      // 同上面的序列化逻辑
-      const serializer = new XMLSerializer()
-      const source = serializer.serializeToString(svgEl)
-      const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>', source], {
-        type: 'image/svg+xml;charset=utf-8',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'mindmap.svg'
-      a.click()
-      URL.revokeObjectURL(url)
-    },
   }
   const handleDownload = () => {
     const task = getCurrentTask()
@@ -430,77 +398,46 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         createAt={createTime}
         showTranscribe={showTranscribe}
         setShowTranscribe={setShowTranscribe}
-        showChat={showChat}
-        setShowChat={setShowChat}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
       />
 
-      {viewMode === 'map' ? (
-        <div className="flex w-full flex-1 overflow-hidden bg-white">
-          <div className={'w-full'}>
-            <MarkmapEditor
-              value={selectedContent}
-              onChange={() => {}}
-              height="100%" // 根据需求可以设定百分比或固定高度
-              title={currentTask?.audioMeta?.title || '思维导图'}
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-1 overflow-hidden bg-white py-2">
-          {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
-            <>
-              {showChat === 'full' && currentTask ? (
-                <div className="h-full w-full">
-                  <ChatPanel taskId={currentTask.id} mode="full" onModeChange={setShowChat} />
-                </div>
-              ) : (
-              <>
-              <ScrollArea className="min-w-0 flex-1">
-                <div className="px-2">
-                  <VideoBanner
-                    audioMeta={currentTask?.audioMeta}
-                    videoUrl={currentTask?.formData?.video_url}
-                  />
-                </div>
-                <div className={'markdown-body w-full px-2'}>
-                  <ReactMarkdown
-                    remarkPlugins={remarkPlugins}
-                    rehypePlugins={rehypePlugins}
-                    components={markdownComponents}
-                  >
-                    {selectedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
-                  </ReactMarkdown>
-                </div>
-              </ScrollArea>
-              {showTranscribe && (
-                <div className={'ml-2 w-2/4'}>
-                  <TranscriptViewer />
-                </div>
-              )}
-              {/* 侧边问答模式：markdown + ChatPanel 各占一半 */}
-              {showChat === 'half' && currentTask && (
-                <div className="ml-2 h-full w-1/2 shrink-0">
-                  <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
-                </div>
-              )}
-              </>
-              )}
-            </>
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <div className="w-[300px] flex-col justify-items-center">
-                <div className="bg-primary-light mb-4 flex h-16 w-16 items-center justify-center rounded-full">
-                  <ArrowRight className="text-primary h-8 w-8" />
-                </div>
-                <p className="mb-2 text-neutral-600">输入视频链接并点击"生成笔记"按钮</p>
-                <p className="text-xs text-neutral-500">支持哔哩哔哩、YouTube等视频网站</p>
+      <div className="flex flex-1 overflow-hidden bg-white py-2">
+        {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
+          <>
+            <ScrollArea className="min-w-0 flex-1">
+              <div className="px-2">
+                <VideoBanner
+                  audioMeta={currentTask?.audioMeta}
+                  videoUrl={currentTask?.formData?.video_url}
+                />
               </div>
+              <div className={'markdown-body w-full px-2'}>
+                <ReactMarkdown
+                  remarkPlugins={remarkPlugins}
+                  rehypePlugins={rehypePlugins}
+                  components={markdownComponents}
+                >
+                  {selectedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
+                </ReactMarkdown>
+              </div>
+            </ScrollArea>
+            {showTranscribe && (
+              <div className={'ml-2 w-2/4'}>
+                <TranscriptViewer />
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            <div className="w-[300px] flex-col justify-items-center">
+              <div className="bg-primary-light mb-4 flex h-16 w-16 items-center justify-center rounded-full">
+                <ArrowRight className="text-primary h-8 w-8" />
+              </div>
+              <p className="mb-2 text-neutral-600">输入视频链接并点击"生成笔记"按钮</p>
+              <p className="text-xs text-neutral-500">支持哔哩哔哩、YouTube等视频网站</p>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   )
 })

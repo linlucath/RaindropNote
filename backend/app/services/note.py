@@ -15,7 +15,7 @@ from app.downloaders.bilibili_downloader import BilibiliDownloader
 from app.downloaders.douyin_downloader import DouyinDownloader
 from app.downloaders.local_downloader import LocalDownloader
 from app.downloaders.youtube_downloader import YoutubeDownloader
-from app.db.video_task_dao import delete_task_by_video, insert_video_task
+from app.db.video_task_dao import delete_task_by_task_id, delete_task_by_video, insert_video_task
 from app.enmus.exception import NoteErrorEnum, ProviderErrorEnum
 from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
@@ -340,14 +340,23 @@ class NoteGenerator:
         )
 
     @staticmethod
-    def delete_note(video_id: str, platform: str) -> int:
+    def delete_note(video_id: Optional[str] = None, platform: Optional[str] = None, task_id: Optional[str] = None) -> int:
         """
-        删除数据库中对应 video_id 与 platform 的任务记录
+        删除数据库中的任务记录
 
         :param video_id: 视频 ID
         :param platform: 平台标识
+        :param task_id: 任务 ID
         :return: 删除的记录数
         """
+        if task_id:
+            logger.info(f"删除笔记记录 (task_id={task_id})")
+            return delete_task_by_task_id(task_id)
+
+        if not video_id or not platform:
+            logger.warning("删除笔记记录失败：缺少 task_id，且未提供完整的 video_id/platform")
+            return 0
+
         logger.info(f"删除笔记记录 (video_id={video_id}, platform={platform})")
         return delete_task_by_video(video_id, platform)
 

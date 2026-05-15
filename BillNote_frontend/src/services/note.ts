@@ -116,17 +116,25 @@ export const generateNote = async (data: {
   }
 }
 
-export const delete_task = async ({ video_id, platform }) => {
+export const delete_task = async ({
+  task_id,
+  video_id,
+  platform,
+}: {
+  task_id?: string
+  video_id?: string
+  platform?: string
+}) => {
   try {
     const data = {
+      task_id,
       video_id,
       platform,
     }
     const res = await request.post('/delete_task', data)
 
-
-      toast.success('任务已成功删除')
-      return res
+    toast.success('任务已成功删除')
+    return res
   } catch (e) {
     toast.error('请求异常，删除任务失败')
     console.error('❌ 删除任务失败:', e)
@@ -162,12 +170,14 @@ export interface BatchVideo {
   video_id: string
   video_url: string
   title?: string
+  author_name?: string
+  dynamic_id?: string
+  cover?: string
 }
 
 export interface FollowingUploader {
   mid: string
   name: string
-  face: string
   sign: string
 }
 
@@ -187,6 +197,13 @@ export interface UploaderVideoPage {
   total?: number | null
 }
 
+export interface BilibiliDynamicPage {
+  items: BatchVideo[]
+  offset: string
+  page_size: number
+  has_more: boolean
+}
+
 export const previewBatchVideos = async (data: {
   space_url: string
   limit?: number
@@ -199,7 +216,6 @@ export const previewBatchVideos = async (data: {
 export const getBilibiliFollowings = async (params?: {
   page?: number
   page_size?: number
-  keyword?: string
 }) => {
   return await request.get('/bilibili/followings', { params, timeout: 15000 })
 }
@@ -211,6 +227,13 @@ export const getBilibiliUploaderVideos = async (params: {
   page_size?: number
 }) => {
   return await request.get('/bilibili/uploader_videos', { params, timeout: 60000 })
+}
+
+export const getBilibiliDynamics = async (params?: {
+  offset?: string
+  page_size?: number
+}) => {
+  return await request.get('/bilibili/dynamics', { params, timeout: 30000 })
 }
 
 export const startBatch = async (data: {

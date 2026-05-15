@@ -6,6 +6,13 @@ interface GetNextSelectedBatchVideoIdsOptions {
   reset: boolean
 }
 
+interface GetNextBatchPreviewStateOptions {
+  currentVideos: BatchVideo[]
+  currentSelectedIds: string[]
+  incomingVideos: BatchVideo[]
+  reset: boolean
+}
+
 interface ShouldToggleVideoItemFromKeydownOptions {
   key: string
   targetIsCurrentTarget: boolean
@@ -22,6 +29,26 @@ export function getNextSelectedBatchVideoIds({
 
   const nextVideoIdSet = new Set(nextVideoIds)
   return currentSelectedIds.filter(videoId => nextVideoIdSet.has(videoId))
+}
+
+export function getNextBatchPreviewState({
+  currentVideos,
+  currentSelectedIds,
+  incomingVideos,
+  reset,
+}: GetNextBatchPreviewStateOptions) {
+  const nextVideos = reset
+    ? getUniqueBatchVideos(incomingVideos)
+    : getUniqueBatchVideos([...currentVideos, ...incomingVideos])
+
+  return {
+    videos: nextVideos,
+    selectedIds: getNextSelectedBatchVideoIds({
+      currentSelectedIds,
+      nextVideoIds: nextVideos.map(video => video.video_id),
+      reset,
+    }),
+  }
 }
 
 export function shouldToggleVideoItemFromKeydown({

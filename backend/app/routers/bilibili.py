@@ -1,8 +1,7 @@
-from typing import Optional
-
 from fastapi import APIRouter, Query
 
 from app.routers.batch import preview_bilibili_space_page
+from app.services.bilibili_dynamic_service import BilibiliDynamicService
 from app.services.bilibili_follow_service import BilibiliFollowService
 from app.services.cookie_manager import CookieConfigManager
 from app.utils.response import ResponseWrapper as R
@@ -10,6 +9,7 @@ from app.utils.response import ResponseWrapper as R
 router = APIRouter()
 cookie_manager = CookieConfigManager()
 follow_service = BilibiliFollowService(cookie_manager.get)
+dynamic_service = BilibiliDynamicService(cookie_manager.get)
 
 
 def build_uploader_space_url(mid: str) -> str:
@@ -20,10 +20,9 @@ def build_uploader_space_url(mid: str) -> str:
 def get_followings(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=50),
-    keyword: Optional[str] = None,
 ):
     try:
-        data = follow_service.get_followings(page=page, page_size=page_size, keyword=keyword)
+        data = follow_service.get_followings(page=page, page_size=page_size)
     except ValueError as exc:
         return R.error(msg=str(exc))
     except Exception as exc:  # pragma: no cover - defensive fallback
@@ -48,3 +47,17 @@ def get_uploader_videos(
     except Exception as exc:  # pragma: no cover - passthrough for runtime failures
         return R.error(msg=f'获取 UP 主视频失败: {exc}')
     return R.success(data=videos)
+
+
+@router.get('/bilibili/dynamics')
+def get_followed_dynamics(
+    offset: str | None = Query(default=None),
+    page_size: int = Query(default=20, ge=1, le=50),
+):
+    try:
+        data = dynamic_service.get_video_dynamics(page_size=page_size, offset=offset)
+    except ValueError as exc:
+        return R.error(msg=str(exc))
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        return R.error(msg=f'获取关注动态失败: {exc}')
+    return R.success(data=data)
