@@ -1,4 +1,4 @@
-import { useMemo, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowUpRight, FileText, ListChecks, Loader2, RefreshCw } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge.tsx'
@@ -8,6 +8,7 @@ import {
   getUniqueBatchVideos,
   shouldToggleVideoItemFromKeydown,
 } from '@/pages/HomePage/components/batchVideoSelection.ts'
+import { shouldRequestNextPage } from '@/pages/HomePage/components/progressiveBatchLoading.ts'
 import type { BatchVideo } from '@/services/note.ts'
 
 export interface BatchStatusItem {
@@ -66,6 +67,8 @@ export default function BatchVideoPreview({
     () => new Map(statusItems.map(item => [item.video_id, item])),
     [statusItems]
   )
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const autoLoadMoreLockedRef = useRef(false)
   const selectedCount = uniqueVideos.reduce(
     (count, video) => count + (selectedIdSet.has(video.video_id) ? 1 : 0),
     0
@@ -74,6 +77,44 @@ export default function BatchVideoPreview({
   const completedCount = statusItems.filter(
     item => item.status === 'SUCCESS' || item.status === 'SKIPPED'
   ).length
+
+  useEffect(() => {
+    if (!loadingMore) {
+      autoLoadMoreLockedRef.current = false
+    }
+  }, [loadingMore])
+
+  const maybeAutoLoadMore = () => {
+    const listElement = listRef.current
+    if (!listElement || !onLoadMore || autoLoadMoreLockedRef.current) {
+      return
+    }
+
+    if (
+      !shouldRequestNextPage({
+        hasMore,
+        loading,
+        loadingMore,
+        scrollTop: listElement.scrollTop,
+        clientHeight: listElement.clientHeight,
+        scrollHeight: listElement.scrollHeight,
+      })
+    ) {
+      return
+    }
+
+    autoLoadMoreLockedRef.current = true
+    onLoadMore()
+  }
+
+  useEffect(() => {
+    if (uniqueVideos.length === 0) {
+      return
+    }
+
+    maybeAutoLoadMore()
+  }, [hasMore, loading, loadingMore, uniqueVideos.length])
+
   const handleVideoItemKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
     videoId: string,
@@ -190,7 +231,13 @@ export default function BatchVideoPreview({
             </div>
           </div>
 
-          <div className="max-h-[28rem] divide-y divide-neutral-100 overflow-y-auto">
+          <div
+            ref={listRef}
+            className="max-h-[28rem] divide-y divide-neutral-100 overflow-y-auto"
+            onScroll={() => {
+              maybeAutoLoadMore()
+            }}
+          >
             {uniqueVideos.map((video, index) => {
               const selected = selectedIdSet.has(video.video_id)
               const statusItem = statusByVideoId.get(video.video_id)

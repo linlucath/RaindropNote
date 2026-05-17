@@ -64,7 +64,7 @@ const statusLabelMap: Record<string, string> = {
   PARSING: '解析链接',
   DOWNLOADING: '下载中',
   TRANSCRIBING: '转写中',
-  SUMMARIZING: '总结中',
+  SUMMARIZING: '校对中',
   FORMATTING: '格式化中',
   SAVING: '保存中',
   SUCCESS: '已完成',
@@ -175,7 +175,12 @@ function TaskCard({
             </Button>
           ) : null}
           {active && task.status !== 'CANCELLING' ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => onCancel(task.task_id)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onCancel(task.task_id)}
+            >
               <Square className="h-3.5 w-3.5" />
               结束任务
             </Button>
@@ -211,7 +216,11 @@ function BatchCard({
               onClick={onToggle}
               className="flex items-center gap-1 text-left text-sm font-semibold text-neutral-900"
             >
-              {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+              {expanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
               <span>{batch.title || '批量任务'}</span>
             </button>
             <StatusBadge status={batch.status} />
@@ -224,12 +233,19 @@ function BatchCard({
             <span>更新于 {formatTime(batch.updated_at)}</span>
           </div>
           {batch.current_item_title ? (
-            <p className="mt-2 text-sm text-neutral-600">当前正在处理：{batch.current_item_title}</p>
+            <p className="mt-2 text-sm text-neutral-600">
+              当前正在处理：{batch.current_item_title}
+            </p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {active && batch.status !== 'CANCELLING' ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => onCancel(batch.batch_id)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onCancel(batch.batch_id)}
+            >
               <Square className="h-3.5 w-3.5" />
               停止批量
             </Button>
@@ -241,16 +257,28 @@ function BatchCard({
         <div className="mt-4 overflow-hidden rounded-md border border-neutral-200">
           <div className="divide-y divide-neutral-100">
             {batch.items.map((item, index) => (
-              <div key={`${batch.batch_id}-${item.video_id}-${index}`} className="flex items-start justify-between gap-3 px-3 py-3">
+              <div
+                key={`${batch.batch_id}-${item.video_id}-${index}`}
+                className="flex items-start justify-between gap-3 px-3 py-3"
+              >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-medium text-neutral-900">{item.title || item.video_id}</span>
+                    <span className="text-sm font-medium text-neutral-900">
+                      {item.title || item.video_id}
+                    </span>
                     <StatusBadge status={item.status} />
                   </div>
-                  {item.message ? <p className="mt-1 text-xs text-neutral-500">{item.message}</p> : null}
+                  {item.message ? (
+                    <p className="mt-1 text-xs text-neutral-500">{item.message}</p>
+                  ) : null}
                 </div>
                 {item.task_id && (item.status === 'SUCCESS' || item.status === 'SKIPPED') ? (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => onOpenTask(item.task_id as string)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onOpenTask(item.task_id as string)}
+                  >
                     查看
                   </Button>
                 ) : null}
@@ -266,7 +294,7 @@ function BatchCard({
 export default function ProgressPage() {
   const navigate = useNavigate()
   const syncSavedTasks = useTaskStore(state => state.syncSavedTasks)
-  const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const setSelectedTask = useTaskStore(state => state.setSelectedTask)
   const [overview, setOverview] = useState<ProgressOverview>(emptyOverview)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -274,21 +302,18 @@ export default function ProgressPage() {
   const [showBatches, setShowBatches] = useState(true)
   const [expandedBatchIds, setExpandedBatchIds] = useState<string[]>([])
 
-  const loadOverview = useCallback(
-    async (silent = false) => {
-      if (!silent) {
-        setRefreshing(true)
-      }
-      try {
-        const data = await getProgressOverview()
-        setOverview(data)
-      } finally {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    },
-    []
-  )
+  const loadOverview = useCallback(async (silent = false) => {
+    if (!silent) {
+      setRefreshing(true)
+    }
+    try {
+      const data = await getProgressOverview()
+      setOverview(data)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
 
   useEffect(() => {
     loadOverview()
@@ -309,10 +334,10 @@ export default function ProgressPage() {
     async (taskId: string) => {
       const res = await get_task_list()
       syncSavedTasks(res?.tasks || [])
-      setCurrentTask(taskId)
+      setSelectedTask(taskId)
       navigate('/')
     },
-    [navigate, setCurrentTask, syncSavedTasks]
+    [navigate, setSelectedTask, syncSavedTasks]
   )
 
   const handleCancelTask = useCallback(
@@ -386,11 +411,23 @@ export default function ProgressPage() {
                 <Activity className="h-4 w-4 text-neutral-500" />
                 <h1 className="text-lg font-semibold text-neutral-900">任务进度</h1>
               </div>
-              <p className="mt-1 text-sm text-neutral-500">集中查看正在处理的任务，也能在这里停止它们。</p>
+              <p className="mt-1 text-sm text-neutral-500">
+                集中查看正在处理的任务，也能在这里停止它们。
+              </p>
             </div>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => loadOverview()} disabled={refreshing}>
-            {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => loadOverview()}
+            disabled={refreshing}
+          >
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
             刷新
           </Button>
         </div>
@@ -440,7 +477,12 @@ export default function ProgressPage() {
                 </div>
               ) : visibleTasks.length ? (
                 visibleTasks.map(task => (
-                  <TaskCard key={task.task_id} task={task} onCancel={handleCancelTask} onOpen={openTask} />
+                  <TaskCard
+                    key={task.task_id}
+                    task={task}
+                    onCancel={handleCancelTask}
+                    onOpen={openTask}
+                  />
                 ))
               ) : (
                 <div className="rounded-md border border-dashed border-neutral-200 bg-white px-4 py-10 text-center text-sm text-neutral-500">
