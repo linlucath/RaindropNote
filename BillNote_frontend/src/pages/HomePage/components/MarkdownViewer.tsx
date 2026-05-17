@@ -18,21 +18,11 @@ import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { useTaskStore } from '@/store/taskStore'
-import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 
-interface VersionNote {
-  ver_id: string
-  content: string
-  style: string
-  model_name: string
-  created_at?: string
-}
-
 interface MarkdownViewerProps {
-  content: string | VersionNote[]
   status: 'idle' | 'loading' | 'success' | 'failed'
 }
 
@@ -40,7 +30,7 @@ const steps = [
   { label: '解析链接', key: 'PARSING' },
   { label: '下载音频', key: 'DOWNLOADING' },
   { label: '转写文字', key: 'TRANSCRIBING' },
-  { label: '总结内容', key: 'SUMMARIZING' },
+  { label: '校对文字', key: 'SUMMARIZING' },
   { label: '保存完成', key: 'SUCCESS' },
 ]
 
@@ -92,8 +82,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     a: ({ href, children, ...props }: any) => {
       const isOriginLink =
-        typeof children[0] === 'string' &&
-        (children[0] as string).startsWith('原片 @')
+        typeof children[0] === 'string' && (children[0] as string).startsWith('原片 @')
 
       if (isOriginLink) {
         const timeMatch = (children[0] as string).match(/原片 @ (\d{2}:\d{2})/)
@@ -124,9 +113,7 @@ function createMarkdownComponents(baseURL: string) {
           {...props}
         >
           {children}
-          {href?.startsWith('http') && (
-            <ExternalLink className="ml-0.5 inline-block h-3 w-3" />
-          )}
+          {href?.startsWith('http') && <ExternalLink className="ml-0.5 inline-block h-3 w-3" />}
         </a>
       )
     },
@@ -159,9 +146,7 @@ function createMarkdownComponents(baseURL: string) {
       const isFakeHeading = /^(\*\*.+\*\*)$/.test(rawText.trim())
 
       if (isFakeHeading) {
-        return (
-          <div className="text-primary my-4 text-lg font-bold">{children}</div>
-        )
+        return <div className="text-primary my-4 text-lg font-bold">{children}</div>
       }
 
       return (
@@ -259,62 +244,36 @@ function createMarkdownComponents(baseURL: string) {
         {children}
       </td>
     ),
-    hr: ({ ...props }: any) => (
-      <hr className="border-muted-foreground/20 my-8" {...props} />
-    ),
+    hr: ({ ...props }: any) => <hr className="border-muted-foreground/20 my-8" {...props} />,
   }
 }
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [copied, setCopied] = useState(false)
-  const [currentVerId, setCurrentVerId] = useState<string>('')
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [modelName, setModelName] = useState<string>('')
-  const [style, setStyle] = useState<string>('')
   const [createTime, setCreateTime] = useState<string>('')
   // 确保baseURL没有尾部斜杠
-  const baseURL = (String(import.meta.env.VITE_API_BASE_URL || '').replace('/api','') || '').replace(/\/$/, '')
-  const getCurrentTask = useTaskStore.getState().getCurrentTask
-  const currentTask = useTaskStore(state => state.getCurrentTask())
+  const baseURL = (
+    String(import.meta.env.VITE_API_BASE_URL || '').replace('/api', '') || ''
+  ).replace(/\/$/, '')
+  const getSelectedTask = useTaskStore.getState().getSelectedTask
+  const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const currentTask = useTaskStore(state => state.getSelectedTask())
   const taskStatus = currentTask?.status || 'PENDING'
   const retryTask = useTaskStore.getState().retryTask
-  const isMultiVersion = Array.isArray(currentTask?.markdown)
   const [showTranscribe, setShowTranscribe] = useState(false)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
 
-  // 多版本内容处理
   useEffect(() => {
     if (!currentTask) return
 
-    if (!isMultiVersion) {
-      setCurrentVerId('') // 清空旧版本 ID
-      setModelName(currentTask.formData.model_name)
-      setStyle(currentTask.formData.style)
-      setCreateTime(currentTask.createdAt)
-      setSelectedContent(currentTask?.markdown)
-    } else {
-      const latestVersion = [...currentTask.markdown].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )[0]
-
-      if (latestVersion) {
-        setCurrentVerId(latestVersion.ver_id)
-      }
-    }
+    setModelName(currentTask.formData.model_name)
+    setCreateTime(currentTask.createdAt)
+    setSelectedContent(currentTask.markdown)
   }, [currentTask?.id, taskStatus])
-  useEffect(() => {
-    if (!currentTask || !isMultiVersion) return
-
-    const currentVer = currentTask.markdown.find(v => v.ver_id === currentVerId)
-    if (currentVer) {
-      setModelName(currentVer.model_name)
-      setStyle(currentVer.style)
-      setCreateTime(currentVer.created_at || '')
-      setSelectedContent(currentVer.content)
-    }
-  }, [currentVerId, currentTask?.id])
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(selectedContent)
@@ -326,8 +285,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     }
   }
   const handleDownload = () => {
-    const task = getCurrentTask()
-    const name = task?.audioMeta.title || 'note'
+    const task = getSelectedTask()
+    const name = task?.audioMeta.title || 'transcript'
     const blob = new Blob([selectedContent], { type: 'text/markdown;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
@@ -343,7 +302,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         <StepBar steps={steps} currentStep={taskStatus} />
         <Loading className="h-5 w-5" />
         <div className="text-center text-sm">
-          <p className="text-lg font-bold">正在生成笔记，请稍候…</p>
+          <p className="text-lg font-bold">正在生成文字稿，请稍候…</p>
           <p className="mt-2 text-xs text-neutral-500">这可能需要几秒钟时间，取决于视频长度</p>
         </div>
       </div>
@@ -355,26 +314,34 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       <div className="flex h-screen w-full flex-col items-center justify-center space-y-3 text-neutral-500">
         <Idle />
         <div className="text-center">
-          <p className="text-lg font-bold">输入视频链接并点击"生成笔记"</p>
+          <p className="text-lg font-bold">输入视频链接并点击"生成文字稿"</p>
           <p className="mt-2 text-xs text-neutral-500">支持哔哩哔哩、YouTube 、抖音等视频平台</p>
         </div>
       </div>
     )
   }
 
-  if (status === 'failed' && !isMultiVersion) {
+  if (status === 'failed') {
     const cancelled = taskStatus === 'CANCELLED'
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
         <Error />
         <div className="text-center">
-          <p className="text-lg font-bold text-red-500">{cancelled ? '任务已取消' : '笔记生成失败'}</p>
+          <p className="text-lg font-bold text-red-500">
+            {cancelled ? '任务已取消' : '文字稿生成失败'}
+          </p>
           <p className="mt-2 mb-2 text-xs text-red-400">
             {cancelled ? '这个任务已经停止，不会继续执行。' : '请检查后台或稍后再试'}
           </p>
 
           {!cancelled ? (
-            <Button onClick={() => retryTask(currentTask.id)} size="lg">
+            <Button
+              onClick={() => {
+                setCurrentTask(currentTask.id)
+                retryTask(currentTask.id)
+              }}
+              size="lg"
+            >
               重试
             </Button>
           ) : null}
@@ -387,12 +354,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     <div className="flex h-screen w-full flex-col overflow-hidden">
       <MarkdownHeader
         currentTask={currentTask}
-        isMultiVersion={isMultiVersion}
-        currentVerId={currentVerId}
-        setCurrentVerId={setCurrentVerId}
         modelName={modelName}
-        style={style}
-        noteStyles={noteStyles}
         onCopy={handleCopy}
         onDownload={handleDownload}
         createAt={createTime}
@@ -432,7 +394,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
               <div className="bg-primary-light mb-4 flex h-16 w-16 items-center justify-center rounded-full">
                 <ArrowRight className="text-primary h-8 w-8" />
               </div>
-              <p className="mb-2 text-neutral-600">输入视频链接并点击"生成笔记"按钮</p>
+              <p className="mb-2 text-neutral-600">输入视频链接并点击"生成文字稿"按钮</p>
               <p className="text-xs text-neutral-500">支持哔哩哔哩、YouTube等视频网站</p>
             </div>
           </div>

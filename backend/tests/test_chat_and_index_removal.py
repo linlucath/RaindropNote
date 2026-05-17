@@ -21,7 +21,8 @@ class TestChatAndIndexRemoval(unittest.TestCase):
 
         with patch("app.routers.note.NoteGenerator") as generator_cls, patch(
             "app.routers.note.save_note_to_file"
-        ), patch("app.routers.note.task_serial_executor.run", side_effect=lambda fn: fn()):
+        ), patch("app.routers.note.get_task_executor") as get_task_executor:
+            get_task_executor.return_value.run.side_effect = lambda fn: fn()
             generator_cls.return_value.generate = Mock(return_value=fake_note)
 
             run_note_task(

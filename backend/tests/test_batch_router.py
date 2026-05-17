@@ -151,7 +151,10 @@ class TestBatchRouter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = Path(tmp) / "task-1.json"
             result.write_text(
-                json.dumps({"audio_meta": {"video_id": "BV123"}}),
+                json.dumps({
+                    "markdown": "# 标题\n\n## 校对文字稿\n\n内容",
+                    "audio_meta": {"video_id": "BV123"},
+                }, ensure_ascii=False),
                 encoding="utf-8",
             )
 
@@ -179,9 +182,9 @@ class TestBatchRouter(unittest.TestCase):
             )
 
             with patch("app.routers.batch.NOTE_OUTPUT_DIR", Path(tmp)):
-                self.assertEqual(batch.find_existing_task_id("BV123", "transcript"), "raw-transcript")
                 self.assertEqual(batch.find_existing_task_id("BV123", "polished_transcript"), "polished-transcript")
-                self.assertIsNone(batch.find_existing_task_id("BV123", "note"))
+                self.assertEqual(batch.find_existing_task_id("BV123"), "polished-transcript")
+                self.assertFalse(raw_transcript.exists())
 
     def test_batch_start_request_defaults_match_single_task_defaults(self):
         request = batch.BatchStartRequest(videos=[
@@ -197,6 +200,7 @@ class TestBatchRouter(unittest.TestCase):
         self.assertEqual(request.format, [])
         self.assertIsNone(request.style)
         self.assertIsNone(request.extras)
+        self.assertEqual(request.mode, "polished_transcript")
         self.assertFalse(request.video_understanding)
         self.assertEqual(request.video_interval, 0)
         self.assertEqual(request.grid_size, [])
@@ -224,7 +228,6 @@ class TestBatchRouter(unittest.TestCase):
                         "title": "示例视频",
                     }
                 ],
-                "mode": "transcript",
             })
 
             self.assertEqual(response.status_code, 200)

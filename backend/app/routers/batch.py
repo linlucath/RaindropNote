@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -13,7 +13,13 @@ from pydantic import BaseModel, Field
 
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
-from app.routers.note import NOTE_OUTPUT_DIR, run_note_task
+from app.routers.note import (
+    NOTE_OUTPUT_DIR,
+    SUPPORTED_GENERATION_MODE,
+    _delete_task_artifacts,
+    run_note_task,
+)
+from app.services.note import NoteGenerator
 from app.services.cookie_manager import CookieConfigManager
 from app.services.progress_state import read_task_status, request_task_cancel, write_task_status
 from app.utils.response import ResponseWrapper as R
@@ -43,7 +49,7 @@ class BatchVideo(BaseModel):
 
 class BatchStartRequest(BaseModel):
     videos: list[BatchVideo]
-    mode: str = "transcript"
+    mode: str = SUPPORTED_GENERATION_MODE
     quality: DownloadQuality = DownloadQuality.fast
     skip_existing: bool = True
     concurrency: int = Field(default=1, ge=1, le=2)
@@ -69,11 +75,7 @@ def _now_iso() -> str:
 
 
 def _default_batch_title(mode: str) -> str:
-    if mode == "transcript":
-        return "批量文字稿任务"
-    if mode == "polished_transcript":
-        return "批量校对任务"
-    return "批量笔记任务"
+    return "批量文字稿任务"
 
 
 def _default_source_label(videos: list[BatchVideo]) -> str:
@@ -321,6 +323,8 @@ def _infer_result_mode(markdown: str) -> str:
 
 def find_existing_task_id(video_id: str, mode: Optional[str] = None) -> Optional[str]:
     output_dir = Path(NOTE_OUTPUT_DIR)
+    requested_mode = mode or SUPPORTED_GENERATION_MODE
+    matched_task_id = None
     for path in output_dir.glob("*.json"):
         name = path.name
         if name.endswith(".status.json") or path.stem.endswith("_audio") or path.stem.endswith("_transcript"):
@@ -331,10 +335,18 @@ def find_existing_task_id(video_id: str, mode: Optional[str] = None) -> Optional
             continue
         if (data.get("audio_meta") or {}).get("video_id") != video_id:
             continue
-        if mode and _infer_result_mode(data.get("markdown") or "") != mode:
+        result_mode = _infer_result_mode(data.get("markdown") or "")
+        if result_mode != SUPPORTED_GENERATION_MODE:
+            _delete_task_artifacts(path.stem, output_dir)
+            NoteGenerator.delete_note(task_id=path.stem)
             continue
-        return path.stem
-    return None
+        if requested_mode != SUPPORTED_GENERATION_MODE:
+            continue
+        if result_mode != requested_mode:
+            continue
+        if matched_task_id is None:
+            matched_task_id = path.stem
+    return matched_task_id
 
 
 def _save_batch(batch: dict) -> None:
@@ -395,13 +407,12 @@ def _finalize_batch_cancel(batch_id: str, message: str = "批量任务已取消"
 
 
 def _request_current_child_cancel(batch: dict) -> None:
-    current_index = batch.get("current_item_index")
-    items = batch.get("items") or []
-    if current_index is None or current_index < 0 or current_index >= len(items):
-        return
-    task_id = items[current_index].get("task_id")
-    if task_id:
-        request_task_cancel(task_id=task_id, output_dir=Path(NOTE_OUTPUT_DIR))
+    for item in batch.get("items") or []:
+        if item.get("status") != "RUNNING":
+            continue
+        task_id = item.get("task_id")
+        if task_id:
+            request_task_cancel(task_id=task_id, output_dir=Path(NOTE_OUTPUT_DIR))
 
 
 def _sync_child_cancel_status(batch_id: str, index: int) -> bool:
@@ -421,61 +432,108 @@ def _sync_child_cancel_status(batch_id: str, index: int) -> bool:
     return True
 
 
+def _run_batch_item(batch_id: str, request: BatchStartRequest, index: int, video: BatchVideo) -> None:
+    if _is_cancel_requested(batch_id):
+        return
+
+    _update_batch(batch_id, current_item_title=video.title or None, current_item_index=index)
+    existing_task_id = find_existing_task_id(video.video_id, request.mode) if request.skip_existing else None
+    if existing_task_id:
+        _set_item(batch_id, index, status="SKIPPED", task_id=existing_task_id, message="已存在，已跳过")
+        return
+
+    task_id = str(uuid.uuid4())
+    _set_item(batch_id, index, status="RUNNING", task_id=task_id, message="")
+    write_task_status(
+        task_id=task_id,
+        output_dir=Path(NOTE_OUTPUT_DIR),
+        status=TaskStatus.PENDING,
+        title=video.title,
+        platform="bilibili",
+    )
+    try:
+        run_note_task(
+            task_id=task_id,
+            video_url=video.video_url,
+            platform="bilibili",
+            quality=request.quality,
+            link=request.link,
+            screenshot=request.screenshot,
+            model_name=request.model_name,
+            provider_id=request.provider_id,
+            _format=request.format,
+            style=request.style,
+            extras=request.extras,
+            video_understanding=request.video_understanding,
+            video_interval=request.video_interval,
+            grid_size=request.grid_size,
+            mode=request.mode,
+            allow_audio_transcription=request.allow_audio_transcription,
+        )
+        result_path = Path(NOTE_OUTPUT_DIR) / f"{task_id}.json"
+        if result_path.exists():
+            _set_item(batch_id, index, status="SUCCESS", message="")
+        elif _sync_child_cancel_status(batch_id, index):
+            pass
+        else:
+            _set_item(batch_id, index, status="FAILED", message="任务未生成结果文件")
+    except Exception as exc:
+        _set_item(batch_id, index, status="FAILED", message=str(exc))
+
+
 def run_batch(batch_id: str, request: BatchStartRequest) -> None:
     if _is_cancel_requested(batch_id):
         _finalize_batch_cancel(batch_id)
         return
 
     _update_batch(batch_id, status="RUNNING")
+    max_workers = max(1, min(request.concurrency, len(request.videos)))
 
-    for index, video in enumerate(request.videos):
-        if _is_cancel_requested(batch_id):
-            _finalize_batch_cancel(batch_id)
-            return
+    if max_workers == 1:
+        for index, video in enumerate(request.videos):
+            if _is_cancel_requested(batch_id):
+                _finalize_batch_cancel(batch_id)
+                return
+            _run_batch_item(batch_id, request, index, video)
+    else:
+        next_index = 0
+        in_flight: dict = {}
 
-        _update_batch(batch_id, current_item_title=video.title or None, current_item_index=index)
-        existing_task_id = find_existing_task_id(video.video_id, request.mode) if request.skip_existing else None
-        if existing_task_id:
-            _set_item(batch_id, index, status="SKIPPED", task_id=existing_task_id, message="已存在，已跳过")
-            continue
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            while next_index < len(request.videos) and len(in_flight) < max_workers:
+                if _is_cancel_requested(batch_id):
+                    break
+                future = executor.submit(
+                    _run_batch_item,
+                    batch_id,
+                    request,
+                    next_index,
+                    request.videos[next_index],
+                )
+                in_flight[future] = next_index
+                next_index += 1
 
-        task_id = str(uuid.uuid4())
-        _set_item(batch_id, index, status="RUNNING", task_id=task_id, message="")
-        write_task_status(
-            task_id=task_id,
-            output_dir=Path(NOTE_OUTPUT_DIR),
-            status=TaskStatus.PENDING,
-            title=video.title,
-            platform="bilibili",
-        )
-        try:
-            run_note_task(
-                task_id=task_id,
-                video_url=video.video_url,
-                platform="bilibili",
-                quality=request.quality,
-                link=request.link,
-                screenshot=request.screenshot,
-                model_name=request.model_name,
-                provider_id=request.provider_id,
-                _format=request.format,
-                style=request.style,
-                extras=request.extras,
-                video_understanding=request.video_understanding,
-                video_interval=request.video_interval,
-                grid_size=request.grid_size,
-                mode=request.mode,
-                allow_audio_transcription=request.allow_audio_transcription,
-            )
-            result_path = Path(NOTE_OUTPUT_DIR) / f"{task_id}.json"
-            if result_path.exists():
-                _set_item(batch_id, index, status="SUCCESS", message="")
-            elif _sync_child_cancel_status(batch_id, index):
-                pass
-            else:
-                _set_item(batch_id, index, status="FAILED", message="任务未生成结果文件")
-        except Exception as exc:
-            _set_item(batch_id, index, status="FAILED", message=str(exc))
+            while in_flight:
+                done, _ = wait(in_flight.keys(), return_when=FIRST_COMPLETED)
+                for future in done:
+                    in_flight.pop(future, None)
+                    future.result()
+
+                while next_index < len(request.videos) and len(in_flight) < max_workers:
+                    if _is_cancel_requested(batch_id):
+                        break
+                    future = executor.submit(
+                        _run_batch_item,
+                        batch_id,
+                        request,
+                        next_index,
+                        request.videos[next_index],
+                    )
+                    in_flight[future] = next_index
+                    next_index += 1
+
+                if _is_cancel_requested(batch_id) and not in_flight:
+                    break
 
     if _is_cancel_requested(batch_id):
         _finalize_batch_cancel(batch_id)
@@ -496,6 +554,8 @@ def batch_preview(data: BatchPreviewRequest):
 
 @router.post("/batch/start")
 def batch_start(data: BatchStartRequest, background_tasks: BackgroundTasks):
+    if data.mode != SUPPORTED_GENERATION_MODE:
+        return R.error(msg="当前仅支持校对文字稿模式", code=400)
     batch_id = str(uuid.uuid4())
     batch = create_batch_payload(batch_id=batch_id, request=data)
     with _batch_lock:

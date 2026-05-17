@@ -29,7 +29,7 @@ export default function AboutPage() {
             <h1 className="text-4xl font-bold">BiliNote v2.0.0</h1>
           </div>
           <p className="text-muted-foreground mb-6 text-xl italic">
-            AI 视频笔记生成工具 让 AI 为你的视频做笔记
+            AI 视频文字稿生成工具 让 AI 为你整理校对后的文字稿
           </p>
 
           <div className="mb-8 flex flex-wrap justify-center gap-2">
@@ -67,9 +67,8 @@ export default function AboutPage() {
           <h2 className="mb-6 text-center text-3xl font-bold">✨ 项目简介</h2>
           <div className="mx-auto max-w-3xl text-center">
             <p className="text-lg">
-              BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、YouTube、抖音等视频链接，
-              自动提取内容并生成结构清晰、重点明确的 Markdown
-              格式笔记。支持插入截图、原片跳转等功能。
+              BiliNote 是一个开源的 AI 视频文字稿助手，支持通过哔哩哔哩、YouTube、抖音等视频链接，
+              自动提取内容并生成校对后的 Markdown 文字稿，方便阅读、搜索与二次整理。
             </p>
           </div>
         </section>
@@ -80,14 +79,12 @@ export default function AboutPage() {
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {[
               { title: '多平台支持', desc: '支持 Bilibili、YouTube、本地视频、抖音等多个平台' },
-              { title: '笔记格式选择', desc: '支持返回多种笔记格式，满足不同需求' },
-              { title: '笔记风格选择', desc: '支持多种笔记风格，个性化定制' },
-              { title: '多模态视频理解', desc: '结合视觉和音频内容，全面理解视频' },
+              { title: '校对文字稿', desc: '默认生成经过大模型校对的 Markdown 文字稿' },
               { title: '自定义 GPT 配置', desc: '支持自行配置 GPT 大模型' },
               { title: '本地音频转写', desc: '支持 Fast-Whisper 等本地模型音频转写' },
-              { title: '结构化笔记', desc: '自动生成结构化 Markdown 笔记' },
-              { title: '智能截图', desc: '可选插入自动截取的关键画面' },
-              { title: '内容跳转', desc: '支持关联原视频的内容跳转链接' },
+              { title: '批量处理', desc: '支持按 UP 主或关注动态批量生成文字稿' },
+              { title: '历史记录', desc: '自动保留校对后的文字稿结果，方便回看' },
+              { title: '原文参照', desc: '可随时查看分段转写原文，核对文字稿内容' },
             ].map((feature, index) => (
               <Card key={index} className="h-full">
                 <CardContent className="pt-2">

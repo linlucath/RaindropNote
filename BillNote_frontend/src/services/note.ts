@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import toast from 'react-hot-toast'
 
-export type GenerationMode = 'note' | 'transcript' | 'polished_transcript'
+export type GenerationMode = 'polished_transcript'
 export type RuntimeTaskStatus =
   | 'PENDING'
   | 'PARSING'
@@ -100,7 +100,7 @@ export const generateNote = async (data: {
       }
       return null
     }
-    toast.success('笔记生成任务已提交！')
+    toast.success('文字稿生成任务已提交！')
 
     console.log('res', response)
     // 成功提示
@@ -151,7 +151,7 @@ export const get_task_status = async (task_id: string) => {
     console.error('❌ 请求出错', e)
 
     // 错误提示
-    toast.error('笔记生成失败，请稍后重试')
+    toast.error('文字稿生成失败，请稍后重试')
 
     throw e // 抛出错误以便调用方处理
   }
