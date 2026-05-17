@@ -10,6 +10,9 @@ lerna-debug.log*
 /.claude/settings.local.json
 /note_results/
 /BillNote_frontend/test-results/
+/bili_note.db
+/vector_db/
+/.tmp-*.png
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 BiliNote/pnpm-lock.yaml
