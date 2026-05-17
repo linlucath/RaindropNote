@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download } from 'lucide-react'
+import { Bookmark, Copy, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +16,9 @@ interface NoteHeaderProps {
   createAt?: string | Date
   showTranscribe: boolean
   setShowTranscribe: (show: boolean) => void
+  favoriteActive?: boolean
+  favoritePending?: boolean
+  onToggleFavorite?: () => void
 }
 
 export function MarkdownHeader({
@@ -26,6 +29,9 @@ export function MarkdownHeader({
   createAt,
   showTranscribe,
   setShowTranscribe,
+  favoriteActive = false,
+  favoritePending = false,
+  onToggleFavorite,
 }: NoteHeaderProps) {
   const [copied, setCopied] = useState(false)
 
@@ -93,6 +99,26 @@ export function MarkdownHeader({
             <TooltipContent>下载为 Markdown 文件</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={onToggleFavorite}
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2"
+                disabled={!onToggleFavorite || favoritePending}
+              >
+                <Bookmark className="mr-1.5 h-4 w-4" />
+                <span className="text-sm">
+                  {favoritePending ? '处理中' : favoriteActive ? '已收藏' : '收藏'}
+                </span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{favoriteActive ? '取消收藏' : '加入收藏'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

@@ -5,6 +5,7 @@ import {
   PanelLeftOpen,
   History as HistoryIcon,
   Activity,
+  Bookmark,
 } from 'lucide-react'
 import {
   Tooltip,
@@ -66,6 +67,20 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
                     </TooltipTrigger>
                     <TooltipContent>
                       <span>任务进度</span>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Link to={'/favorites'}>
+                        <button className="text-muted-foreground hover:text-primary cursor-pointer rounded p-1 hover:bg-neutral-100">
+                          <Bookmark className="h-5 w-5" />
+                        </button>
+                      </Link>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <span>收藏页</span>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
