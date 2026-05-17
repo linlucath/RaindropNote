@@ -11,6 +11,7 @@ import { HomePage } from './pages/HomePage/Home.tsx'
 // 非首屏页面使用 React.lazy 按需加载
 const SettingPage = lazy(() => import('./pages/SettingPage/index.tsx'))
 const ProgressPage = lazy(() => import('./pages/ProgressPage/index.tsx'))
+const FavoritesPage = lazy(() => import('./pages/FavoritesPage/index.tsx'))
 const Model = lazy(() => import('@/pages/SettingPage/Model.tsx'))
 const ProviderForm = lazy(() => import('@/components/Form/modelForm/Form.tsx'))
 const AboutPage = lazy(() => import('@/pages/SettingPage/about.tsx'))
@@ -49,6 +50,7 @@ function App() {
             <Route path="/" element={<Index />}>
               <Route index element={<HomePage />} />
               <Route path="progress" element={<ProgressPage />} />
+              <Route path="favorites" element={<FavoritesPage />} />
               <Route path="settings" element={<SettingPage />}>
                 <Route index element={<Navigate to="model" replace />} />
                 <Route path="model" element={<Model />}>

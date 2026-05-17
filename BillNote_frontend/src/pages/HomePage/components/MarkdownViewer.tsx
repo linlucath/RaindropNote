@@ -21,6 +21,11 @@ import { useTaskStore } from '@/store/taskStore'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
+import {
+  createFavorite,
+  deleteFavorite,
+  getFavoriteByTask,
+} from '@/services/favorite.ts'
 
 interface MarkdownViewerProps {
   status: 'idle' | 'loading' | 'success' | 'failed'
@@ -263,6 +268,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const taskStatus = currentTask?.status || 'PENDING'
   const retryTask = useTaskStore.getState().retryTask
   const [showTranscribe, setShowTranscribe] = useState(false)
+  const [favoriteId, setFavoriteId] = useState<number | null>(null)
+  const [favoritePending, setFavoritePending] = useState(false)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
@@ -274,6 +281,48 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     setCreateTime(currentTask.createdAt)
     setSelectedContent(currentTask.markdown)
   }, [currentTask?.id, taskStatus])
+
+  useEffect(() => {
+    if (!currentTask?.id || status !== 'success') {
+      setFavoriteId(null)
+      return
+    }
+
+    let cancelled = false
+
+    getFavoriteByTask(currentTask.id)
+      .then(({ favorite }) => {
+        if (cancelled) return
+        setFavoriteId(favorite?.id ?? null)
+      })
+      .catch(error => {
+        if (!cancelled) {
+          console.warn('查询收藏状态失败', error)
+          setFavoriteId(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentTask?.id, status])
+
+  const handleToggleFavorite = async () => {
+    if (!currentTask?.id) return
+
+    setFavoritePending(true)
+    try {
+      if (favoriteId) {
+        await deleteFavorite(favoriteId)
+        setFavoriteId(null)
+      } else {
+        const { favorite } = await createFavorite(currentTask.id)
+        setFavoriteId(favorite.id)
+      }
+    } finally {
+      setFavoritePending(false)
+    }
+  }
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(selectedContent)
@@ -360,6 +409,9 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         createAt={createTime}
         showTranscribe={showTranscribe}
         setShowTranscribe={setShowTranscribe}
+        favoriteActive={favoriteId !== null}
+        favoritePending={favoritePending}
+        onToggleFavorite={status === 'success' ? handleToggleFavorite : undefined}
       />
 
       <div className="flex flex-1 overflow-hidden bg-white py-2">
