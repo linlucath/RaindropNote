@@ -7,9 +7,9 @@ import History from '@/pages/HomePage/components/History.tsx'
 type ViewStatus = 'idle' | 'loading' | 'success' | 'failed'
 export const HomePage: FC = () => {
   const tasks = useTaskStore(state => state.tasks)
-  const currentTaskId = useTaskStore(state => state.currentTaskId)
+  const selectedTaskId = useTaskStore(state => state.selectedTaskId)
 
-  const currentTask = tasks.find(t => t.id === currentTaskId)
+  const currentTask = tasks.find(t => t.id === (selectedTaskId ?? null))
 
   const [status, setStatus] = useState<ViewStatus>('idle')
 

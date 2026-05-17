@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, Loader2, RefreshCw, UserRound } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
@@ -9,9 +9,12 @@ import {
   FollowingUploaderPage,
   getBilibiliFollowings,
 } from '@/services/note.ts'
+import { shouldRequestNextPage } from '@/pages/HomePage/components/progressiveBatchLoading.ts'
 
 interface FollowingUploaderPickerProps {
   selectedMid?: string
+  initialPageData?: FollowingUploaderPage | null
+  preloading?: boolean
   onSelectUploader: (uploader: FollowingUploader) => void
 }
 
@@ -23,6 +26,8 @@ const DEFAULT_PAGE_SIZE = 20
 
 export default function FollowingUploaderPicker({
   selectedMid,
+  initialPageData = null,
+  preloading = false,
   onSelectUploader,
 }: FollowingUploaderPickerProps) {
   const [configured, setConfigured] = useState<boolean | null>(null)
@@ -32,6 +37,10 @@ export default function FollowingUploaderPicker({
   const [hasMore, setHasMore] = useState(false)
   const [items, setItems] = useState<FollowingUploader[]>([])
   const [error, setError] = useState<string>('')
+  const listRef = useRef<HTMLDivElement | null>(null)
+  const hydratedInitialDataRef = useRef(false)
+  const attemptedInitialLoadRef = useRef(false)
+  const autoLoadMoreLockedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -52,11 +61,31 @@ export default function FollowingUploaderPicker({
     }
   }, [])
 
+  useEffect(() => {
+    if (!initialPageData || hydratedInitialDataRef.current) {
+      return
+    }
+
+    hydratedInitialDataRef.current = true
+    attemptedInitialLoadRef.current = true
+    setItems(initialPageData.items)
+    setPage(initialPageData.page)
+    setHasMore(initialPageData.has_more)
+    setError('')
+  }, [initialPageData])
+
+  useEffect(() => {
+    if (!loadingMore) {
+      autoLoadMoreLockedRef.current = false
+    }
+  }, [loadingMore])
+
   const emptyMessage = useMemo(() => {
     if (error) return error
     if (configured === false) return '请先到设置页填写 Bilibili Cookie'
     return '当前账号暂无可读取的关注 UP 主'
   }, [configured, error])
+  const showInitialLoading = loading || (preloading && items.length === 0)
 
   const loadFollowings = async (nextPage: number, reset = false) => {
     const setter = reset ? setLoading : setLoadingMore
@@ -89,6 +118,46 @@ export default function FollowingUploaderPicker({
     await loadFollowings(page + 1, false)
   }
 
+  const maybeAutoLoadMore = () => {
+    const listElement = listRef.current
+    if (!listElement || autoLoadMoreLockedRef.current) {
+      return
+    }
+
+    if (
+      !shouldRequestNextPage({
+        hasMore,
+        loading,
+        loadingMore,
+        scrollTop: listElement.scrollTop,
+        clientHeight: listElement.clientHeight,
+        scrollHeight: listElement.scrollHeight,
+      })
+    ) {
+      return
+    }
+
+    autoLoadMoreLockedRef.current = true
+    void handleLoadMore()
+  }
+
+  useEffect(() => {
+    if (configured !== true || preloading || attemptedInitialLoadRef.current || items.length > 0) {
+      return
+    }
+
+    attemptedInitialLoadRef.current = true
+    void loadFollowings(1, true)
+  }, [configured, items.length, preloading])
+
+  useEffect(() => {
+    if (items.length === 0) {
+      return
+    }
+
+    maybeAutoLoadMore()
+  }, [hasMore, items.length, loading, loadingMore])
+
   const handleUploaderItemKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
     uploader: FollowingUploader
@@ -115,10 +184,10 @@ export default function FollowingUploaderPicker({
           type="button"
           variant="outline"
           className="h-10 px-3"
-          disabled={loading || configured === false}
+          disabled={showInitialLoading || configured === false}
           onClick={() => void handleRefresh()}
         >
-          {loading ? (
+          {showInitialLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
             <RefreshCw className="mr-2 h-4 w-4" />
@@ -136,7 +205,7 @@ export default function FollowingUploaderPicker({
 
       {items.length === 0 ? (
         <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-neutral-200 bg-neutral-50/50 px-4 py-6 text-center">
-          {loading ? (
+          {showInitialLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-neutral-400" />
           ) : (
             <UserRound className="h-4 w-4 text-neutral-400" />
@@ -145,7 +214,13 @@ export default function FollowingUploaderPicker({
         </div>
       ) : (
         <div className="overflow-hidden rounded-md border border-neutral-200 bg-white">
-          <div className="max-h-72 divide-y divide-neutral-100 overflow-y-auto">
+          <div
+            ref={listRef}
+            className="max-h-72 divide-y divide-neutral-100 overflow-y-auto"
+            onScroll={() => {
+              maybeAutoLoadMore()
+            }}
+          >
             {items.map(item => {
               const selected = item.mid === selectedMid
               return (
