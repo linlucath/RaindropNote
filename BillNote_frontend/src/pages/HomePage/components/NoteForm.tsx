@@ -12,18 +12,19 @@ import { FieldErrors, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus, RefreshCw, Settings2, UploadCloud } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
+import { Info, Loader2, Plus, RefreshCw, UploadCloud } from 'lucide-react'
 import {
   BatchVideo,
   BilibiliDynamicPage,
   FollowingUploader,
+  FollowingUploaderPage,
   TERMINAL_BATCH_STATUSES,
   TERMINAL_TASK_STATUSES,
   GenerationMode,
   UploaderVideoPage,
   generateNote,
   getBilibiliDynamics,
+  getBilibiliFollowings,
   getBilibiliUploaderVideos,
   get_task_list,
   getBatchStatus,
@@ -31,6 +32,7 @@ import {
   startBatch,
 } from '@/services/note.ts'
 import { uploadFile } from '@/services/upload.ts'
+import { getDownloaderCookie } from '@/services/downloader.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
 import {
@@ -39,13 +41,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx'
-import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import BatchVideoPreview from '@/pages/HomePage/components/BatchVideoPreview.tsx'
 import {
   getNextBatchPreviewState,
   getUniqueBatchVideos,
 } from '@/pages/HomePage/components/batchVideoSelection.ts'
+import { shouldAutoLoadSelectedUploaderVideos } from '@/pages/HomePage/components/progressiveBatchLoading.ts'
 import { shouldReuseTaskForSubmission } from '@/pages/HomePage/components/taskSubmission.ts'
 import FollowingUploaderPicker from '@/pages/HomePage/components/FollowingUploaderPicker.tsx'
 import {
@@ -57,8 +59,7 @@ import {
 } from '@/components/ui/select.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { Switch } from '@/components/ui/switch.tsx'
-import { Textarea } from '@/components/ui/textarea.tsx'
-import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
+import { videoPlatforms } from '@/constant/note.ts'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
@@ -68,69 +69,50 @@ const formSchema = z
     video_url: z.string().optional(),
     source_type: z.enum(['single', 'uploader_batch', 'dynamics']).default('single'),
     uploader_source_mode: z.enum(['manual', 'followings']).default('manual'),
-    mode: z.enum(['note', 'transcript']).default('note'),
-    polish_transcript: z.boolean().default(false).optional(),
     batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
     skip_existing: z.boolean().default(true).optional(),
     platform: z.string().nonempty('请选择平台'),
     quality: z.enum(['fast', 'medium', 'slow']),
-    screenshot: z.boolean().optional(),
-    link: z.boolean().optional(),
     model_name: z.string().optional(),
-    format: z.array(z.string()).default([]),
-    style: z.string().optional(),
-    extras: z.string().optional(),
-    video_understanding: z.boolean().optional(),
-    video_interval: z.coerce.number().min(1).max(30).default(6).optional(),
-    grid_size: z
-      .tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)])
-      .default([2, 2])
-      .optional(),
     allow_audio_transcription: z.boolean().default(false).optional(),
   })
   .superRefine(
-    (
-      { video_url, platform, source_type, uploader_source_mode, mode, model_name, style, polish_transcript },
-      ctx
-    ) => {
-    if (source_type === 'uploader_batch') {
-      if (uploader_source_mode === 'manual') {
+    ({ video_url, platform, source_type, uploader_source_mode, model_name }, ctx) => {
+      if (source_type === 'uploader_batch') {
+        if (uploader_source_mode === 'manual') {
+          if (!video_url) {
+            ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
+          } else if (!video_url.includes('space.bilibili.com')) {
+            ctx.addIssue({
+              code: 'custom',
+              message: '请输入 B 站 UP 主主页链接',
+              path: ['video_url'],
+            })
+          }
+        }
+      } else if (source_type === 'dynamics') {
+        // Followed dynamics are account-backed and do not need a direct video URL input.
+      } else if (platform === 'local') {
         if (!video_url) {
-          ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
-        } else if (!video_url.includes('space.bilibili.com')) {
-          ctx.addIssue({ code: 'custom', message: '请输入 B 站 UP 主主页链接', path: ['video_url'] })
+          ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
         }
-      }
-    } else if (source_type === 'dynamics') {
-      // Followed dynamics are account-backed and do not need a direct video URL input.
-    } else if (platform === 'local') {
-      if (!video_url) {
-        ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
-      }
-    } else {
-      if (!video_url) {
-        ctx.addIssue({ code: 'custom', message: '视频链接不能为空', path: ['video_url'] })
       } else {
-        try {
-          const url = new URL(video_url)
-          if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
-        } catch {
-          ctx.addIssue({ code: 'custom', message: '请输入正确的视频链接', path: ['video_url'] })
+        if (!video_url) {
+          ctx.addIssue({ code: 'custom', message: '视频链接不能为空', path: ['video_url'] })
+        } else {
+          try {
+            const url = new URL(video_url)
+            if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+          } catch {
+            ctx.addIssue({ code: 'custom', message: '请输入正确的视频链接', path: ['video_url'] })
+          }
         }
       }
-    }
-    const needsModel = mode === 'note' || (mode === 'transcript' && polish_transcript)
-    if (needsModel) {
       if (!model_name) {
         ctx.addIssue({ code: 'custom', message: '请选择模型', path: ['model_name'] })
       }
     }
-    if (mode === 'note') {
-      if (!style) {
-        ctx.addIssue({ code: 'custom', message: '请选择笔记生成风格', path: ['style'] })
-      }
-    }
-  })
+  )
 
 export type NoteFormValues = z.infer<typeof formSchema>
 
@@ -198,31 +180,6 @@ const WorkspaceSection = ({
   </section>
 )
 
-const CheckboxGroup = ({
-  value = [],
-  onChange,
-  disabledMap,
-}: {
-  value?: string[]
-  onChange: (v: string[]) => void
-  disabledMap: Record<string, boolean>
-}) => (
-  <div className="flex flex-wrap space-x-1.5">
-    {noteFormats.map(({ label, value: v }) => (
-      <label key={v} className="flex items-center space-x-2">
-        <Checkbox
-          checked={value.includes(v)}
-          disabled={disabledMap[v]}
-          onCheckedChange={checked =>
-            onChange(checked ? [...value, v] : value.filter(x => x !== v))
-          }
-        />
-        <span>{label}</span>
-      </label>
-    ))}
-  </div>
-)
-
 /* -------------------- 主组件 -------------------- */
 const NoteForm = () => {
   const navigate = useNavigate()
@@ -233,11 +190,11 @@ const NoteForm = () => {
     addPendingTask,
     currentTaskId,
     setCurrentTask,
+    setSelectedTask,
     getCurrentTask,
     retryTask,
     syncSavedTasks,
-  } =
-    useTaskStore()
+  } = useTaskStore()
   const { loadEnabledModels, modelList } = useModelStore()
 
   /* ---- 表单 ---- */
@@ -247,16 +204,10 @@ const NoteForm = () => {
       platform: 'bilibili',
       source_type: 'single',
       uploader_source_mode: 'manual',
-      mode: 'note',
       batch_limit: 0,
       skip_existing: true,
       quality: 'medium',
       model_name: modelList[0]?.model_name || '',
-      style: 'minimal',
-      polish_transcript: false,
-      video_interval: 6,
-      grid_size: [2, 2],
-      format: [],
       allow_audio_transcription: false,
     },
   })
@@ -273,6 +224,12 @@ const NoteForm = () => {
   const [previewHasMore, setPreviewHasMore] = useState(false)
   const [previewSignature, setPreviewSignature] = useState<string | null>(null)
   const [selectedUploader, setSelectedUploader] = useState<FollowingUploader | null>(null)
+  const [prefetchedFollowings, setPrefetchedFollowings] = useState<FollowingUploaderPage | null>(
+    null
+  )
+  const [prefetchingFollowings, setPrefetchingFollowings] = useState(false)
+  const followingsPrefetchStartedRef = useRef(false)
+  const lastAutoLoadedUploaderMidRef = useRef<string | null>(null)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
   const sourceType = useWatch({ control: form.control, name: 'source_type' }) as
@@ -283,18 +240,12 @@ const NoteForm = () => {
     | 'manual'
     | 'followings'
   const platform = useWatch({ control: form.control, name: 'platform' }) as string
-  const mode = useWatch({ control: form.control, name: 'mode' }) as GenerationMode
-  const polishTranscript = useWatch({ control: form.control, name: 'polish_transcript' }) as
-    | boolean
+  const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as
+    | string
     | undefined
-  const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
-  const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as string | undefined
   const watchedBatchLimit = useWatch({ control: form.control, name: 'batch_limit' }) as
     | number
     | undefined
-  const transcriptOnly = mode === 'transcript'
-  const transcriptMode = mode !== 'note'
-  const usesModel = mode === 'note' || !!polishTranscript
   const uploaderBatchMode = sourceType === 'uploader_batch'
   const dynamicsMode = sourceType === 'dynamics'
   const batchMode = uploaderBatchMode || dynamicsMode
@@ -309,13 +260,24 @@ const NoteForm = () => {
         dynamicsMode
           ? { source: 'dynamics', limit: watchedBatchLimit ?? 0 }
           : uploaderSourceMode === 'followings'
-          ? { source: 'followings', mid: selectedUploader?.mid || '', limit: watchedBatchLimit ?? 0 }
-          : { source: 'manual', space_url: (watchedVideoUrl || '').trim(), limit: watchedBatchLimit ?? 0 }
+            ? {
+                source: 'followings',
+                mid: selectedUploader?.mid || '',
+                limit: watchedBatchLimit ?? 0,
+              }
+            : {
+                source: 'manual',
+                space_url: (watchedVideoUrl || '').trim(),
+                limit: watchedBatchLimit ?? 0,
+              }
       ),
     [dynamicsMode, selectedUploader?.mid, uploaderSourceMode, watchedBatchLimit, watchedVideoUrl]
   )
   const previewDirty =
-    batchMode && previewVideos.length > 0 && previewSignature !== null && previewSignature !== batchRequestSignature
+    batchMode &&
+    previewVideos.length > 0 &&
+    previewSignature !== null &&
+    previewSignature !== batchRequestSignature
 
   const goModelAdd = () => {
     navigate('/settings/model')
@@ -326,6 +288,45 @@ const NoteForm = () => {
 
     return
   }, [loadEnabledModels])
+  useEffect(() => {
+    let cancelled = false
+
+    if (followingsPrefetchStartedRef.current) {
+      return
+    }
+
+    followingsPrefetchStartedRef.current = true
+
+    const preloadFollowings = async () => {
+      try {
+        const cookieData = await getDownloaderCookie('bilibili')
+        if (cancelled || !cookieData?.cookie) {
+          return
+        }
+
+        setPrefetchingFollowings(true)
+        const data = (await getBilibiliFollowings({
+          page: 1,
+          page_size: PREVIEW_PAGE_SIZE,
+        })) as FollowingUploaderPage
+        if (!cancelled) {
+          setPrefetchedFollowings(data)
+        }
+      } catch {
+        // Keep homepage boot quiet; the picker still allows manual refresh later.
+      } finally {
+        if (!cancelled) {
+          setPrefetchingFollowings(false)
+        }
+      }
+    }
+
+    void preloadFollowings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
   useEffect(() => {
     if (!currentTaskId) {
       hydratedTaskIdRef.current = null
@@ -341,22 +342,11 @@ const NoteForm = () => {
       platform: formData.platform || 'bilibili',
       source_type: formData.source_type || 'single',
       uploader_source_mode: formData.uploader_source_mode || 'manual',
-      mode: formData.mode === 'note' ? 'note' : 'transcript',
-      polish_transcript:
-        formData.polish_transcript ?? formData.mode === 'polished_transcript',
       video_url: formData.video_url || '',
       model_name: formData.model_name || modelList[0]?.model_name || '',
-      style: formData.style || 'minimal',
       quality: formData.quality || 'medium',
       batch_limit: formData.batch_limit ?? 0,
       skip_existing: formData.skip_existing ?? true,
-      extras: formData.extras || '',
-      screenshot: formData.screenshot ?? false,
-      link: formData.link ?? false,
-      video_understanding: formData.video_understanding ?? false,
-      video_interval: formData.video_interval ?? 6,
-      grid_size: formData.grid_size ?? [2, 2],
-      format: formData.format ?? [],
       allow_audio_transcription: formData.allow_audio_transcription ?? false,
     })
     setPreviewVideos([])
@@ -368,6 +358,39 @@ const NoteForm = () => {
     setSelectedUploader(null)
     hydratedTaskIdRef.current = currentTaskId
   }, [currentTaskId, form, getCurrentTask, modelList])
+
+  useEffect(() => {
+    const selectedUploaderMid = selectedUploader?.mid || null
+    if (selectedUploaderMid === null) {
+      lastAutoLoadedUploaderMidRef.current = null
+      return
+    }
+
+    if (
+      !shouldAutoLoadSelectedUploaderVideos({
+        uploaderBatchMode,
+        uploaderSourceMode,
+        selectedUploaderMid,
+        batchLoading,
+        previewLoadingMore,
+      })
+    ) {
+      return
+    }
+
+    if (lastAutoLoadedUploaderMidRef.current === selectedUploaderMid) {
+      return
+    }
+
+    lastAutoLoadedUploaderMidRef.current = selectedUploaderMid
+    void loadPreviewBatchPage(true)
+  }, [
+    batchLoading,
+    selectedUploader?.mid,
+    uploaderBatchMode,
+    uploaderSourceMode,
+    previewLoadingMore,
+  ])
 
   /* ---- 帮助函数 ---- */
   const isGenerating = () => {
@@ -395,12 +418,7 @@ const NoteForm = () => {
 
   const onSubmit = async (values: NoteFormValues) => {
     const selectedModel = modelList.find(m => m.model_name === values.model_name)
-    const resolvedMode: GenerationMode =
-      values.mode === 'transcript' && values.polish_transcript ? 'polished_transcript' : values.mode
-    const selectedFormats = values.mode === 'note' ? values.format ?? [] : []
-    const wantsLink = selectedFormats.includes('link')
-    const wantsScreenshot =
-      values.mode === 'note' && values.video_understanding ? selectedFormats.includes('screenshot') : false
+    const resolvedMode: GenerationMode = 'polished_transcript'
     const reuseCurrentTask = shouldReuseTaskForSubmission({
       currentTaskId,
       currentTask,
@@ -408,13 +426,17 @@ const NoteForm = () => {
     })
 
     if (batchMode) {
-      if (previewDirty || previewSignature !== batchRequestSignature || previewVideos.length === 0) {
+      if (
+        previewDirty ||
+        previewSignature !== batchRequestSignature ||
+        previewVideos.length === 0
+      ) {
         toast.error(
           values.source_type === 'dynamics'
             ? '关注动态或视频数已变更，请先重新拉取视频列表'
             : values.uploader_source_mode === 'followings'
-            ? '已选择的 UP 主或视频数已变更，请先重新拉取视频列表'
-            : 'UP 主链接或视频数已变更，请先重新拉取视频列表'
+              ? '已选择的 UP 主或视频数已变更，请先重新拉取视频列表'
+              : 'UP 主链接或视频数已变更，请先重新拉取视频列表'
         )
         return
       }
@@ -436,21 +458,9 @@ const NoteForm = () => {
           mode: resolvedMode,
           quality: values.quality,
           skip_existing: values.skip_existing ?? true,
-          concurrency: 1,
-          link: wantsLink,
-          screenshot: wantsScreenshot,
-          model_name: resolvedMode === 'transcript' ? undefined : values.model_name,
-          provider_id: resolvedMode === 'transcript' ? undefined : selectedModel?.provider_id,
-          format: selectedFormats,
-          style: values.mode === 'note' ? values.style : undefined,
-          extras: values.mode === 'note' ? values.extras : undefined,
-          video_understanding: values.mode === 'note' ? values.video_understanding ?? false : false,
-          video_interval:
-            values.mode === 'note' && values.video_understanding
-              ? values.video_interval ?? 6
-              : 0,
-          grid_size:
-            values.mode === 'note' && values.video_understanding ? values.grid_size ?? [2, 2] : [],
+          concurrency: 2,
+          model_name: values.model_name,
+          provider_id: selectedModel?.provider_id,
           allow_audio_transcription: values.allow_audio_transcription ?? false,
         })
         setBatchId(data.batch_id)
@@ -473,26 +483,17 @@ const NoteForm = () => {
 
     const payload = {
       ...values,
-      mode: resolvedMode === 'polished_transcript' ? 'transcript' : values.mode,
-      provider_id: resolvedMode === 'transcript' ? undefined : selectedModel?.provider_id,
-      task_id: reuseCurrentTask ? currentTaskId || '' : undefined,
-      link: transcriptMode ? false : wantsLink,
-      screenshot: transcriptMode ? false : wantsScreenshot,
-      video_understanding: transcriptMode ? false : values.video_understanding,
-      format: transcriptMode ? [] : selectedFormats,
-      allow_audio_transcription: values.allow_audio_transcription ?? false,
-    }
-    const requestPayload = {
-      ...payload,
       mode: resolvedMode,
+      provider_id: selectedModel?.provider_id,
+      task_id: reuseCurrentTask ? currentTaskId || '' : undefined,
+      allow_audio_transcription: values.allow_audio_transcription ?? false,
     }
     if (reuseCurrentTask) {
       retryTask(currentTaskId, payload)
       return
     }
 
-    // message.success('已提交任务')
-    const data = await generateNote(requestPayload)
+    const data = await generateNote(payload)
     addPendingTask(data.task_id, values.platform, payload)
   }
   const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
@@ -504,17 +505,11 @@ const NoteForm = () => {
       platform: 'bilibili',
       source_type: 'single',
       uploader_source_mode: 'manual',
-      mode: 'note',
       video_url: '',
       batch_limit: 0,
       skip_existing: true,
       quality: 'medium',
       model_name: modelList[0]?.model_name || '',
-      style: 'minimal',
-      polish_transcript: false,
-      video_interval: 6,
-      grid_size: [2, 2],
-      format: [],
       allow_audio_transcription: false,
     })
     setPreviewVideos([])
@@ -530,13 +525,8 @@ const NoteForm = () => {
   }
   const FormButton = () => {
     const batchRunning = batchStatus && !TERMINAL_BATCH_STATUSES.includes(batchStatus.status)
-    const baseLabel = batchMode
-      ? '开始批量处理'
-      : transcriptOnly
-        ? polishTranscript
-          ? '校对文字稿'
-          : '生成文字稿'
-        : '生成笔记'
+    const submitDisabled = batchMode ? batchLoading || batchRunning || previewDirty : generating
+    const baseLabel = batchMode ? '开始批量处理' : '生成文字稿'
     const selectedLabel =
       batchMode && selectedPreviewVideos.length
         ? `${baseLabel}（${selectedPreviewVideos.length}）`
@@ -555,7 +545,7 @@ const NoteForm = () => {
         <Button
           type="submit"
           className={editing ? 'h-11 flex-1' : 'h-11 w-full'}
-          disabled={generating || batchRunning || (batchMode && previewDirty)}
+          disabled={submitDisabled}
         >
           {(generating || batchRunning) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {label}
@@ -564,7 +554,7 @@ const NoteForm = () => {
         {editing && (
           <Button type="button" variant="outline" className="h-11 w-32" onClick={handleCreateNew}>
             <Plus className="mr-2 h-4 w-4" />
-            新建笔记
+            新建任务
           </Button>
         )}
       </div>
@@ -585,20 +575,23 @@ const NoteForm = () => {
         : ['batch_limit']
     )
     if (!valid) {
-      toast.error(dynamicsSource || sourceMode !== 'manual' ? '请先确认最多视频数' : '请先填写有效的 UP 主主页链接')
+      toast.error(
+        dynamicsSource || sourceMode !== 'manual'
+          ? '请先确认最多视频数'
+          : '请先填写有效的 UP 主主页链接'
+      )
       return
     }
     if (!dynamicsSource && sourceMode === 'followings' && !selectedUploader) {
       toast.error('请先从关注列表中选择一个 UP 主')
       return
     }
-    const effectivePageSize =
-      dynamicsSource
-        ? getDynamicRequestPageSize({
-            batchLimit: values.batch_limit ?? 0,
-            loadedCount: reset ? 0 : previewVideos.length,
-          })
-        : PREVIEW_PAGE_SIZE
+    const effectivePageSize = dynamicsSource
+      ? getDynamicRequestPageSize({
+          batchLimit: values.batch_limit ?? 0,
+          loadedCount: reset ? 0 : previewVideos.length,
+        })
+      : PREVIEW_PAGE_SIZE
     if (dynamicsSource && effectivePageSize <= 0) {
       setPreviewHasMore(false)
       return
@@ -619,25 +612,24 @@ const NoteForm = () => {
         page_size: effectivePageSize,
         has_more: false,
       }
-      const payload =
-        dynamicsSource
-          ? (((await getBilibiliDynamics({
-              offset: reset ? undefined : previewOffset || undefined,
-              page_size: effectivePageSize,
-            })) as BilibiliDynamicPage) || dynamicFallbackPayload)
-          : sourceMode === 'followings'
-          ? (((await getBilibiliUploaderVideos({
+      const payload = dynamicsSource
+        ? ((await getBilibiliDynamics({
+            offset: reset ? undefined : previewOffset || undefined,
+            page_size: effectivePageSize,
+          })) as BilibiliDynamicPage) || dynamicFallbackPayload
+        : sourceMode === 'followings'
+          ? ((await getBilibiliUploaderVideos({
               mid: selectedUploader?.mid || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
               limit: values.batch_limit ?? 0,
-            })) as UploaderVideoPage) || uploaderFallbackPayload)
-          : (((await previewBatchVideos({
+            })) as UploaderVideoPage) || uploaderFallbackPayload
+          : ((await previewBatchVideos({
               space_url: values.video_url || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
               limit: values.batch_limit ?? 0,
-            })) as UploaderVideoPage) || uploaderFallbackPayload)
+            })) as UploaderVideoPage) || uploaderFallbackPayload
       const videos = getUniqueBatchVideos(payload.items || [])
       const nextPreviewState = getNextBatchPreviewState({
         currentVideos: previewVideos,
@@ -666,8 +658,16 @@ const NoteForm = () => {
             dynamicsSource
               ? { source: 'dynamics', limit: values.batch_limit ?? 0 }
               : sourceMode === 'followings'
-              ? { source: 'followings', mid: selectedUploader?.mid || '', limit: values.batch_limit ?? 0 }
-              : { source: 'manual', space_url: (values.video_url || '').trim(), limit: values.batch_limit ?? 0 }
+                ? {
+                    source: 'followings',
+                    mid: selectedUploader?.mid || '',
+                    limit: values.batch_limit ?? 0,
+                  }
+                : {
+                    source: 'manual',
+                    space_url: (values.video_url || '').trim(),
+                    limit: values.batch_limit ?? 0,
+                  }
           )
         )
         setBatchId(null)
@@ -697,7 +697,7 @@ const NoteForm = () => {
     try {
       const res = await get_task_list()
       syncSavedTasks(res?.tasks || [])
-      setCurrentTask(taskId)
+      setSelectedTask(taskId)
     } catch (error) {
       console.warn('同步批量任务历史失败', error)
       toast.error('结果已生成，但同步历史失败，请稍后重试')
@@ -712,7 +712,9 @@ const NoteForm = () => {
         const next = data as BatchStatus
         const becameTerminal =
           prev &&
-          !TERMINAL_BATCH_STATUSES.includes(prev.status as (typeof TERMINAL_BATCH_STATUSES)[number]) &&
+          !TERMINAL_BATCH_STATUSES.includes(
+            prev.status as (typeof TERMINAL_BATCH_STATUSES)[number]
+          ) &&
           TERMINAL_BATCH_STATUSES.includes(next.status as (typeof TERMINAL_BATCH_STATUSES)[number])
 
         if (becameTerminal) {
@@ -722,7 +724,9 @@ const NoteForm = () => {
         }
         return next
       })
-      if (TERMINAL_BATCH_STATUSES.includes(data.status as (typeof TERMINAL_BATCH_STATUSES)[number])) {
+      if (
+        TERMINAL_BATCH_STATUSES.includes(data.status as (typeof TERMINAL_BATCH_STATUSES)[number])
+      ) {
         setBatchLoading(false)
         clearInterval(timer)
       }
@@ -763,11 +767,12 @@ const NoteForm = () => {
                                 setCurrentTask(null)
                               }
                               field.onChange(option.value)
-                              form.setValue('polish_transcript', false)
                               form.setValue('video_url', '')
-                              if (option.value === 'uploader_batch' || option.value === 'dynamics') {
+                              if (
+                                option.value === 'uploader_batch' ||
+                                option.value === 'dynamics'
+                              ) {
                                 form.setValue('platform', 'bilibili')
-                                form.setValue('mode', 'transcript')
                                 form.setValue('uploader_source_mode', 'manual')
                               }
                               setPreviewVideos([])
@@ -779,46 +784,6 @@ const NoteForm = () => {
                               setPreviewSignature(null)
                               setBatchStatus(null)
                               setSelectedUploader(null)
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="mode"
-                render={({ field }) => (
-                  <FormItem>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { value: 'note', label: '笔记' },
-                        { value: 'transcript', label: '文字稿' },
-                      ].map(option => {
-                        const active = field.value === option.value
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={`h-9 rounded-md border px-2 text-sm transition-colors ${
-                              active
-                                ? 'border-neutral-800 bg-neutral-900 text-white'
-                                : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50'
-                            }`}
-                            onClick={() => {
-                              if (editing) {
-                                setCurrentTask(null)
-                              }
-                              field.onChange(option.value)
-                              if (option.value === 'note') {
-                                form.setValue('polish_transcript', false)
-                              }
                             }}
                           >
                             {option.label}
@@ -1003,6 +968,8 @@ const NoteForm = () => {
               {uploaderBatchMode && uploaderSourceMode === 'followings' ? (
                 <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
                   <FollowingUploaderPicker
+                    initialPageData={prefetchedFollowings}
+                    preloading={prefetchingFollowings}
                     selectedMid={selectedUploader?.mid}
                     onSelectUploader={uploader => {
                       setSelectedUploader(uploader)
@@ -1113,8 +1080,8 @@ const NoteForm = () => {
           </WorkspaceSection>
 
           {batchMode && (
-          <WorkspaceSection title="2. 选择视频" tip="标题是主要信息，勾选后再开始批量处理">
-            <div className="space-y-3">
+            <WorkspaceSection title="2. 选择视频" tip="标题是主要信息，勾选后再开始批量处理">
+              <div className="space-y-3">
                 <BatchVideoPreview
                   videos={previewVideos}
                   selectedVideoIds={selectedBatchVideoIds}
@@ -1127,16 +1094,16 @@ const NoteForm = () => {
                     dynamicsMode
                       ? '先拉取关注动态，再从里面选择投稿视频'
                       : uploaderSourceMode === 'followings'
-                      ? '先从关注列表选择一个 UP 主，再拉取视频标题'
-                      : '粘贴 UP 主主页后拉取视频标题'
+                        ? '先从关注列表选择一个 UP 主，再拉取视频标题'
+                        : '粘贴 UP 主主页后拉取视频标题'
                   }
                   stale={previewDirty}
                   staleMessage={
                     dynamicsMode
                       ? '你修改了最多视频数，当前标题列表不再对应最新条件。'
                       : uploaderSourceMode === 'followings'
-                      ? '你修改了所选 UP 主或最多视频数，当前标题列表不再对应最新条件。'
-                      : '你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。'
+                        ? '你修改了所选 UP 主或最多视频数，当前标题列表不再对应最新条件。'
+                        : '你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。'
                   }
                   onPreview={handlePreviewBatch}
                   onLoadMore={() => void loadPreviewBatchPage(false)}
@@ -1184,8 +1151,7 @@ const NoteForm = () => {
                     </div>
                     {!!batchStatus.items?.some(
                       item =>
-                        item.task_id &&
-                        (item.status === 'SUCCESS' || item.status === 'SKIPPED')
+                        item.task_id && (item.status === 'SUCCESS' || item.status === 'SKIPPED')
                     ) && (
                       <div className="mt-2 text-[11px] text-neutral-500">
                         成功项已同步到历史区，也可以在列表里直接点“查看”。
@@ -1199,75 +1165,17 @@ const NoteForm = () => {
 
           <WorkspaceSection title={batchMode ? '3. 生成设置' : '生成设置'}>
             <div className="space-y-3">
-              {usesModel &&
-                (modelList.length > 0 ? (
-                  <FormField
-                    control={form.control}
-                    name="model_name"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>模型</FormLabel>
-                        <Select
-                          onOpenChange={() => {
-                            loadEnabledModels()
-                          }}
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full min-w-0 truncate">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {modelList.map(m => (
-                              <SelectItem key={m.id} value={m.model_name}>
-                                {m.model_name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                ) : (
-                  <Button type="button" variant="outline" className="w-full" onClick={goModelAdd}>
-                    请先添加模型
-                  </Button>
-                ))}
-
-              {transcriptOnly && (
+              {modelList.length > 0 ? (
                 <FormField
                   control={form.control}
-                  name="polish_transcript"
-                  render={({ field }) => (
-                    <FormItem className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <FormLabel>是否校对</FormLabel>
-                          <div className="text-xs text-neutral-500">
-                            关闭时快速生成文字稿，开启时调用模型输出校对稿
-                          </div>
-                        </div>
-                        <FormControl>
-                          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              {mode === 'note' && (
-                <FormField
-                  control={form.control}
-                  name="style"
+                  name="model_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>笔记风格</FormLabel>
+                      <FormLabel>模型</FormLabel>
                       <Select
+                        onOpenChange={() => {
+                          loadEnabledModels()
+                        }}
                         value={field.value}
                         onValueChange={field.onChange}
                       >
@@ -1277,9 +1185,9 @@ const NoteForm = () => {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {noteStyles.map(({ label, value }) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
+                          {modelList.map(m => (
+                            <SelectItem key={m.id} value={m.model_name}>
+                              {m.model_name}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -1288,6 +1196,10 @@ const NoteForm = () => {
                     </FormItem>
                   )}
                 />
+              ) : (
+                <Button type="button" variant="outline" className="w-full" onClick={goModelAdd}>
+                  请先添加模型
+                </Button>
               )}
 
               <FormField
@@ -1296,10 +1208,7 @@ const NoteForm = () => {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>处理速度</FormLabel>
-                    <Select
-                      value={field.value}
-                      onValueChange={field.onChange}
-                    >
+                    <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl>
                         <SelectTrigger className="w-full">
                           <SelectValue />
@@ -1315,125 +1224,29 @@ const NoteForm = () => {
                   </FormItem>
                 )}
               />
+
+              <FormField
+                control={form.control}
+                name="allow_audio_transcription"
+                render={({ field }) => (
+                  <FormItem className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <FormLabel>无字幕时允许音频转写</FormLabel>
+                        <div className="text-xs text-neutral-500">
+                          关闭时只使用现成字幕；开启后找不到字幕会继续下载音频并转写。
+                        </div>
+                      </div>
+                      <FormControl>
+                        <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                      </FormControl>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
           </WorkspaceSection>
-
-          {!transcriptMode && (
-            <WorkspaceSection title="输出选项">
-              <div className="space-y-4">
-                <div className="rounded-md border border-neutral-100 bg-neutral-50 p-3">
-                  <div className="mb-3 flex items-center gap-2">
-                    <Settings2 className="h-4 w-4 text-neutral-500" />
-                    <span className="text-sm font-medium text-neutral-700">视频理解</span>
-                  </div>
-                  <div className="space-y-3">
-                    <FormField
-                      control={form.control}
-                      name="video_understanding"
-                      render={() => (
-                        <FormItem>
-                          <div className="flex items-center justify-between">
-                            <FormLabel>启用</FormLabel>
-                            <Checkbox
-                              checked={!!videoUnderstandingEnabled}
-                              onCheckedChange={v => form.setValue('video_understanding', !!v)}
-                            />
-                          </div>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    {videoUnderstandingEnabled && (
-                      <div className="grid grid-cols-2 gap-3">
-                        <FormField
-                          control={form.control}
-                          name="video_interval"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>采样间隔</FormLabel>
-                              <Input type="number" {...field} />
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                        <FormField
-                          control={form.control}
-                          name="grid_size"
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>拼图尺寸</FormLabel>
-                              <div className="flex items-center gap-2">
-                                <Input
-                                  type="number"
-                                  value={field.value?.[0] || 3}
-                                  onChange={e =>
-                                    field.onChange([+e.target.value, field.value?.[1] || 3])
-                                  }
-                                  className="w-16"
-                                />
-                                <span className="text-neutral-400">x</span>
-                                <Input
-                                  type="number"
-                                  value={field.value?.[1] || 3}
-                                  onChange={e =>
-                                    field.onChange([field.value?.[0] || 3, +e.target.value])
-                                  }
-                                  className="w-16"
-                                />
-                              </div>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      </div>
-                    )}
-
-                    {videoUnderstandingEnabled && (
-                      <Alert variant="warning" className="text-sm">
-                        <AlertDescription>
-                          <strong>提示：</strong>视频理解功能必须使用多模态模型。
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </div>
-                </div>
-
-                <FormField
-                  control={form.control}
-                  name="format"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>笔记格式</FormLabel>
-                      <CheckboxGroup
-                        value={field.value}
-                        onChange={field.onChange}
-                        disabledMap={{
-                          link: platform === 'local',
-                          screenshot: !videoUnderstandingEnabled,
-                          toc: false,
-                          summary: false,
-                        }}
-                      />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="extras"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>备注</FormLabel>
-                      <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </WorkspaceSection>
-          )}
 
           <div className="sticky bottom-0 z-10 -mx-1 bg-white/95 px-1 pt-2 pb-1 backdrop-blur">
             <FormButton />

@@ -2,13 +2,13 @@
 import json
 import os
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
-from pydantic import BaseModel, validator, field_validator
-from dataclasses import asdict
+from pydantic import BaseModel, field_validator
 
 from app.db.video_task_dao import get_task_by_video
 from app.enmus.exception import NoteErrorEnum
@@ -17,7 +17,7 @@ from app.exceptions.note import NoteError
 from app.services.note import NoteGenerator, logger
 from app.services.progress_query import build_progress_overview
 from app.services.progress_state import read_task_status, request_task_cancel
-from app.services.task_serial_executor import task_serial_executor
+from app.services.task_serial_executor import get_task_executor
 from app.utils.response import ResponseWrapper as R
 from app.utils.url_parser import extract_video_id
 from app.validators.video_url_validator import is_supported_video_url
@@ -30,6 +30,7 @@ from app.enmus.task_status_enums import TaskStatus
 # from app.services.whisperer import transcribe_audio
 
 router = APIRouter()
+SUPPORTED_GENERATION_MODE = "polished_transcript"
 
 
 class RecordRequest(BaseModel):
@@ -57,7 +58,7 @@ class VideoRequest(BaseModel):
     video_understanding: Optional[bool] = False
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
-    mode: Optional[str] = "note"
+    mode: Optional[str] = SUPPORTED_GENERATION_MODE
     allow_audio_transcription: Optional[bool] = False
 
     @field_validator("video_url")
@@ -87,6 +88,24 @@ def _is_note_result_file(path: Path) -> bool:
     )
 
 
+def _normalize_generation_mode(mode: Optional[str]) -> str:
+    normalized = (mode or SUPPORTED_GENERATION_MODE).strip() or SUPPORTED_GENERATION_MODE
+    if normalized != SUPPORTED_GENERATION_MODE:
+        raise HTTPException(status_code=400, detail="当前仅支持校对文字稿模式")
+    return normalized
+
+
+def _is_polished_transcript_result(result_content: dict) -> bool:
+    markdown = result_content.get("markdown")
+    return isinstance(markdown, str) and "## 校对文字稿" in markdown
+
+
+def _purge_legacy_task_result(task_id: str, output_dir: Path) -> int:
+    deleted_files = _delete_task_artifacts(task_id, output_dir)
+    NoteGenerator.delete_note(task_id=task_id)
+    return deleted_files
+
+
 def list_saved_tasks():
     output_dir = Path(NOTE_OUTPUT_DIR)
     if not output_dir.exists():
@@ -103,6 +122,11 @@ def list_saved_tasks():
                 result_content = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning(f"读取笔记结果失败，跳过 {result_path}: {e}")
+            continue
+
+        if not _is_polished_transcript_result(result_content):
+            deleted_files = _purge_legacy_task_result(task_id, output_dir)
+            logger.info(f"已清理旧模式结果 {task_id} ({deleted_files} 个文件)")
             continue
 
         status = TaskStatus.SUCCESS.value
@@ -186,10 +210,11 @@ def save_note_to_file(task_id: str, note):
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[], mode: str = "note", allow_audio_transcription: bool = False
+                  video_interval=0, grid_size=[], mode: str = SUPPORTED_GENERATION_MODE, allow_audio_transcription: bool = False
                   ):
+    mode = _normalize_generation_mode(mode)
 
-    if mode in {"note", "polished_transcript"} and (not model_name or not provider_id):
+    if not model_name or not provider_id:
         raise HTTPException(status_code=400, detail="请选择模型和提供者")
 
     def _execute_note_task():
@@ -212,8 +237,9 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             allow_audio_transcription=allow_audio_transcription,
         )
 
-    logger.info(f"任务进入执行队列 (task_id={task_id})")
-    note = task_serial_executor.run(_execute_note_task)
+    executor = get_task_executor(mode)
+    logger.info(f"任务进入执行队列 (task_id={task_id}, mode={mode})")
+    note = executor.run(_execute_note_task)
     logger.info(f"Note generated: {task_id}")
     if not note or not note.markdown:
         logger.warning(f"任务 {task_id} 执行失败，跳过保存")
@@ -285,7 +311,7 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                   data.extras, data.video_understanding, data.video_interval, data.grid_size,
-                                  data.mode or "note", data.allow_audio_transcription or False)
+                                  _normalize_generation_mode(data.mode), data.allow_audio_transcription or False)
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

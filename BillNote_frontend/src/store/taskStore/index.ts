@@ -1,11 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { delete_task, generateNote, GenerationMode, RuntimeTaskStatus } from '@/services/note.ts'
-import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 import { buildPersistedTaskState } from './persistTaskState.ts'
 import { buildSyncedTasksState } from './syncSavedTasks.ts'
-
 
 export type TaskStatus = RuntimeTaskStatus | 'RUNNING' | 'FAILD'
 
@@ -31,17 +29,9 @@ export interface Transcript {
   raw: any
   segments: Segment[]
 }
-export interface Markdown {
-  ver_id: string
-  content: string
-  style: string
-  model_name: string
-  created_at: string
-}
-
 export interface Task {
   id: string
-  markdown: string|Markdown [] //为了兼容之前的笔记
+  markdown: string
   transcript: Transcript
   status: TaskStatus
   platform: string
@@ -74,12 +64,15 @@ export interface Task {
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
+  selectedTaskId: string | null
   addPendingTask: (taskId: string, platform: string, formData?: any) => void
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   removeTask: (id: string) => void
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
+  setSelectedTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
+  getSelectedTask: () => Task | null
   retryTask: (id: string, payload?: any) => void
   syncSavedTasks: (savedTasks: any[]) => void
 }
@@ -89,9 +82,9 @@ export const useTaskStore = create<TaskStore>()(
     (set, get) => ({
       tasks: [],
       currentTaskId: null,
+      selectedTaskId: null,
 
       addPendingTask: (taskId: string, platform: string, formData: any) =>
-
         set(state => ({
           tasks: [
             {
@@ -119,91 +112,55 @@ export const useTaskStore = create<TaskStore>()(
             },
             ...state.tasks,
           ],
-          currentTaskId: taskId, // 默认设置为当前任务
+          currentTaskId: taskId,
+          selectedTaskId: taskId,
         })),
 
       updateTaskContent: (id, data) =>
-          set(state => ({
-            tasks: state.tasks.map(task => {
-              if (task.id !== id) return task
+        set(state => ({
+          tasks: state.tasks.map(task => {
+            if (task.id !== id) return task
 
-              if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
+            if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
 
-              // 如果是 markdown 字符串，封装为版本
-              if (typeof data.markdown === 'string') {
-                const prev = task.markdown
-                const newVersion: Markdown = {
-                  ver_id: `${task.id}-${uuidv4()}`,
-                  content: data.markdown,
-                  style: task.formData.style || '',
-                  model_name: task.formData.model_name || '',
-                  created_at: new Date().toISOString(),
-                }
-
-                let updatedMarkdown: Markdown[]
-                if (Array.isArray(prev)) {
-                  updatedMarkdown = [newVersion, ...prev]
-                } else {
-                  updatedMarkdown = [
-                    newVersion,
-                    ...(typeof prev === 'string' && prev
-                        ? [{
-                          ver_id: `${task.id}-${uuidv4()}`,
-                          content: prev,
-                          style: task.formData.style || '',
-                          model_name: task.formData.model_name || '',
-                          created_at: new Date().toISOString(),
-                        }]
-                        : []),
-                  ]
-                }
-
-                return {
-                  ...task,
-                  ...data,
-                  markdown: updatedMarkdown,
-                }
-              }
-
-              return { ...task, ...data }
-            }),
-          })),
-
+            return { ...task, ...data }
+          }),
+        })),
 
       getCurrentTask: () => {
         const currentTaskId = get().currentTaskId
         return get().tasks.find(task => task.id === currentTaskId) || null
       },
+      getSelectedTask: () => {
+        const { currentTaskId, selectedTaskId, tasks } = get()
+        const resolvedTaskId = selectedTaskId || currentTaskId
+        return tasks.find(task => task.id === resolvedTaskId) || null
+      },
       retryTask: async (id: string, payload?: any) => {
-
-        if (!id){
+        if (!id) {
           toast.error('任务不存在')
           return
         }
         const task = get().tasks.find(task => task.id === id)
-        console.log('retry',task)
+        console.log('retry', task)
         if (!task) return
 
         const newFormData = payload || task.formData
-        const requestMode =
-          newFormData.mode === 'transcript' && newFormData.polish_transcript
-            ? 'polished_transcript'
-            : newFormData.mode
         await generateNote({
           ...newFormData,
-          mode: requestMode,
+          mode: 'polished_transcript',
           task_id: id,
         })
 
         set(state => ({
           tasks: state.tasks.map(t =>
-              t.id === id
-                  ? {
-                    ...t,
-                    formData: newFormData, // ✅ 显式更新 formData
-                    status: 'PENDING',
-                  }
-                  : t
+            t.id === id
+              ? {
+                  ...t,
+                  formData: newFormData, // ✅ 显式更新 formData
+                  status: 'PENDING',
+                }
+              : t
           ),
         }))
       },
@@ -214,9 +171,9 @@ export const useTaskStore = create<TaskStore>()(
             savedTasks,
             existingTasks: state.tasks,
             currentTaskId: state.currentTaskId,
+            selectedTaskId: state.selectedTaskId,
           })
         }),
-
 
       removeTask: async id => {
         const task = get().tasks.find(t => t.id === id)
@@ -226,6 +183,7 @@ export const useTaskStore = create<TaskStore>()(
           set(state => ({
             tasks: state.tasks.filter(task => task.id !== id),
             currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
+            selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
           }))
         } catch (error) {
           console.warn('删除任务时写入本地缓存失败，将继续调用后端删除接口', error)
@@ -241,9 +199,10 @@ export const useTaskStore = create<TaskStore>()(
         }
       },
 
-      clearTasks: () => set({ tasks: [], currentTaskId: null }),
+      clearTasks: () => set({ tasks: [], currentTaskId: null, selectedTaskId: null }),
 
       setCurrentTask: taskId => set({ currentTaskId: taskId }),
+      setSelectedTask: taskId => set({ selectedTaskId: taskId }),
     }),
     {
       name: 'task-storage',

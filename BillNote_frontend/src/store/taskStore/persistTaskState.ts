@@ -19,9 +19,12 @@ function buildPersistedTask(task: Task): Task {
   }
 }
 
-export function buildPersistedTaskState(state: TaskStore): Pick<TaskStore, 'tasks' | 'currentTaskId'> {
+export function buildPersistedTaskState(
+  state: TaskStore
+): Pick<TaskStore, 'tasks' | 'currentTaskId' | 'selectedTaskId'> {
   return {
     currentTaskId: state.currentTaskId,
+    selectedTaskId: state.selectedTaskId,
     tasks: state.tasks
       .filter(task => !TERMINAL_TASK_STATUSES.has(task.status))
       .map(buildPersistedTask),

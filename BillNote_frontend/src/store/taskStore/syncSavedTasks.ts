@@ -14,6 +14,7 @@ type BuildSyncedTasksStateArgs = {
   savedTasks: SavedTaskItem[]
   existingTasks: Task[]
   currentTaskId: string | null
+  selectedTaskId: string | null
 }
 
 const TERMINAL_TASK_STATUSES = new Set(['SUCCESS', 'FAILED', 'CANCELLED', 'FAILD'])
@@ -35,23 +36,25 @@ function restoreTask(item: SavedTaskItem): Task | null {
     ''
   const markdown = typeof result.markdown === 'string' ? result.markdown : ''
   const isPolishedTranscript = markdown.includes('## 校对文字稿')
-  const isTranscript = isPolishedTranscript || markdown.includes('## 简体中文文字稿')
-  const mode: GenerationMode = isTranscript ? 'transcript' : 'note'
 
-  if (!item?.task_id || !markdown) return null
+  if (!item?.task_id || !markdown || !isPolishedTranscript) return null
 
   return {
     id: item.task_id,
     status: item.status || 'SUCCESS',
     markdown,
-    transcript: asRecord(result.transcript).full_text ? result.transcript : {
-      full_text: '',
-      language: '',
-      raw: null,
-      segments: [],
-    },
+    transcript: asRecord(result.transcript).full_text
+      ? result.transcript
+      : {
+          full_text: '',
+          language: '',
+          raw: null,
+          segments: [],
+        },
     platform,
-    createdAt: item.created_at ? new Date(item.created_at * 1000).toISOString() : new Date().toISOString(),
+    createdAt: item.created_at
+      ? new Date(item.created_at * 1000).toISOString()
+      : new Date().toISOString(),
     audioMeta: {
       cover_url: '',
       duration: 0,
@@ -71,8 +74,7 @@ function restoreTask(item: SavedTaskItem): Task | null {
       model_name: typeof result.model_name === 'string' ? result.model_name : '',
       provider_id: '',
       style: typeof result.style === 'string' ? result.style : '',
-      mode,
-      polish_transcript: isPolishedTranscript,
+      mode: 'polished_transcript' as GenerationMode,
     },
   }
 }
@@ -81,7 +83,11 @@ export function buildSyncedTasksState({
   savedTasks,
   existingTasks,
   currentTaskId,
-}: BuildSyncedTasksStateArgs): Pick<{ tasks: Task[]; currentTaskId: string | null }, 'tasks' | 'currentTaskId'> {
+  selectedTaskId,
+}: BuildSyncedTasksStateArgs): Pick<
+  { tasks: Task[]; currentTaskId: string | null; selectedTaskId: string | null },
+  'tasks' | 'currentTaskId' | 'selectedTaskId'
+> {
   const restoredTasks = savedTasks.map(restoreTask).filter(Boolean) as Task[]
   const restoredById = new Map(restoredTasks.map(task => [task.id, task]))
 
@@ -107,9 +113,14 @@ export function buildSyncedTasksState({
   const tasks = [...restoredById.values(), ...mergedExisting]
   const nextCurrentTaskId =
     currentTaskId && tasks.some(task => task.id === currentTaskId) ? currentTaskId : null
+  const nextSelectedTaskId =
+    selectedTaskId && tasks.some(task => task.id === selectedTaskId)
+      ? selectedTaskId
+      : nextCurrentTaskId
 
   return {
     tasks,
     currentTaskId: nextCurrentTaskId,
+    selectedTaskId: nextSelectedTaskId,
   }
 }

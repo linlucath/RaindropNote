@@ -34,3 +34,12 @@ class SerialTaskExecutor:
 
 
 task_serial_executor = SerialTaskExecutor()
+transcript_task_executor = ConcurrentTaskExecutor(
+    max_workers=int(os.getenv("TRANSCRIPT_TASK_MAX_WORKERS", os.getenv("TASK_MAX_WORKERS", "3")))
+)
+
+
+def get_task_executor(mode: str | None) -> SerialTaskExecutor | ConcurrentTaskExecutor:
+    if mode in {"transcript", "polished_transcript"}:
+        return transcript_task_executor
+    return task_serial_executor

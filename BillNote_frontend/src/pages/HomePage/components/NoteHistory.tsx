@@ -47,7 +47,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
         <div className="mb-2">
           <input
             type="text"
-            placeholder="搜索笔记标题..."
+            placeholder="搜索文字稿标题..."
             className="w-full rounded border border-neutral-300 px-3 py-1 text-sm outline-none focus:border-primary"
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -65,7 +65,7 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
       <div className="mb-2">
         <input
           type="text"
-          placeholder="搜索笔记标题..."
+          placeholder="搜索文字稿标题..."
           className="w-full rounded border border-neutral-300 px-3 py-1 text-sm outline-none focus:border-primary"
           value={search}
           onChange={e => setSearch(e.target.value)}
@@ -87,11 +87,11 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <div className="line-clamp-2 max-w-[180px] flex-1 overflow-hidden text-sm text-ellipsis">
-                        {task.audioMeta.title || '未命名笔记'}
+                        {task.audioMeta.title || '未命名文字稿'}
                       </div>
                     </TooltipTrigger>
                     <TooltipContent>
-                      <p>{task.audioMeta.title || '未命名笔记'}</p>
+                      <p>{task.audioMeta.title || '未命名文字稿'}</p>
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
@@ -99,18 +99,11 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
             </div>
             <div className={'mt-2 flex items-center justify-between text-[10px]'}>
               <div className="shrink-0">
-                {task.formData?.mode === 'transcript' && (
-                  <div
-                    className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}
-                  >
-                    文字稿
-                  </div>
-                )}
                 {task.formData?.mode === 'polished_transcript' && (
                   <div
-                    className={'mr-1 inline-block w-10 rounded bg-neutral-700 p-0.5 text-center text-white'}
+                    className={'mr-1 inline-block rounded bg-neutral-700 px-2 py-0.5 text-center text-white'}
                   >
-                    校对稿
+                    文字稿
                   </div>
                 )}
                 {task.status === 'SUCCESS' && (

@@ -30,7 +30,7 @@ test('buildSyncedTasksState drops persisted tasks that are no longer returned by
       model_name: '',
       provider_id: '',
       style: '',
-      mode: 'note',
+      mode: 'polished_transcript',
     },
   } satisfies Task
 
@@ -38,10 +38,12 @@ test('buildSyncedTasksState drops persisted tasks that are no longer returned by
     savedTasks: [],
     existingTasks: [staleTask],
     currentTaskId: 'task-stale',
+    selectedTaskId: 'task-stale',
   })
 
   assert.deepEqual(nextState.tasks, [])
   assert.equal(nextState.currentTaskId, null)
+  assert.equal(nextState.selectedTaskId, null)
 })
 
 test('buildSyncedTasksState keeps pending local-only tasks while still syncing saved tasks', () => {
@@ -70,7 +72,7 @@ test('buildSyncedTasksState keeps pending local-only tasks while still syncing s
       model_name: '',
       provider_id: '',
       style: '',
-      mode: 'note',
+      mode: 'polished_transcript',
     },
   } satisfies Task
 
@@ -81,7 +83,7 @@ test('buildSyncedTasksState keeps pending local-only tasks while still syncing s
         status: 'SUCCESS',
         created_at: 1_778_730_000,
         result: {
-          markdown: '# synced',
+          markdown: '# 标题\n\n## 校对文字稿\n\nsynced',
           audio_meta: {
             video_id: 'BVsuccess',
             platform: 'bilibili',
@@ -92,6 +94,7 @@ test('buildSyncedTasksState keeps pending local-only tasks while still syncing s
     ],
     existingTasks: [pendingTask],
     currentTaskId: 'task-pending',
+    selectedTaskId: 'task-success',
   })
 
   assert.deepEqual(
@@ -99,4 +102,60 @@ test('buildSyncedTasksState keeps pending local-only tasks while still syncing s
     ['task-success', 'task-pending']
   )
   assert.equal(nextState.currentTaskId, 'task-pending')
+  assert.equal(nextState.selectedTaskId, 'task-success')
+})
+
+test('buildSyncedTasksState drops legacy note and raw transcript history returned by the backend', () => {
+  const nextState = buildSyncedTasksState({
+    savedTasks: [
+      {
+        task_id: 'task-note',
+        status: 'SUCCESS',
+        created_at: 1_778_730_000,
+        result: {
+          markdown: '# 标题\n\n## 要点总结\n\n旧笔记',
+          audio_meta: {
+            video_id: 'BVnote',
+            platform: 'bilibili',
+            title: '旧笔记',
+          },
+        },
+      },
+      {
+        task_id: 'task-raw',
+        status: 'SUCCESS',
+        created_at: 1_778_730_001,
+        result: {
+          markdown: '# 标题\n\n## 简体中文文字稿\n\n未校对文字稿',
+          audio_meta: {
+            video_id: 'BVraw',
+            platform: 'bilibili',
+            title: '未校对文字稿',
+          },
+        },
+      },
+      {
+        task_id: 'task-polished',
+        status: 'SUCCESS',
+        created_at: 1_778_730_002,
+        result: {
+          markdown: '# 标题\n\n## 校对文字稿\n\n保留内容',
+          audio_meta: {
+            video_id: 'BVpolished',
+            platform: 'bilibili',
+            title: '校对稿',
+          },
+        },
+      },
+    ],
+    existingTasks: [],
+    currentTaskId: null,
+    selectedTaskId: null,
+  })
+
+  assert.deepEqual(
+    nextState.tasks.map(task => task.id),
+    ['task-polished']
+  )
+  assert.equal(nextState.tasks[0].formData.mode, 'polished_transcript')
 })

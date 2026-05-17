@@ -32,7 +32,7 @@ export const useTaskPolling = (interval = 3000) => {
           if (status && status !== task.status) {
             if (status === 'SUCCESS') {
               const { markdown, transcript, audio_meta } = res.result
-              toast.success('笔记生成成功')
+              toast.success('文字稿生成成功')
               updateTaskContent(task.id, {
                 status,
                 markdown,
