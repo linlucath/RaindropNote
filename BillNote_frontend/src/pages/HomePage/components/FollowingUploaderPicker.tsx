@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, Loader2, RefreshCw, UserRound } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
@@ -118,7 +118,7 @@ export default function FollowingUploaderPicker({
     await loadFollowings(page + 1, false)
   }
 
-  const maybeAutoLoadMore = () => {
+  const maybeAutoLoadMore = useEffectEvent(() => {
     const listElement = listRef.current
     if (!listElement || autoLoadMoreLockedRef.current) {
       return
@@ -139,7 +139,7 @@ export default function FollowingUploaderPicker({
 
     autoLoadMoreLockedRef.current = true
     void handleLoadMore()
-  }
+  })
 
   useEffect(() => {
     if (configured !== true || preloading || attemptedInitialLoadRef.current || items.length > 0) {
@@ -156,7 +156,7 @@ export default function FollowingUploaderPicker({
     }
 
     maybeAutoLoadMore()
-  }, [hasMore, items.length, loading, loadingMore])
+  }, [hasMore, items.length, loading, loadingMore, maybeAutoLoadMore])
 
   const handleUploaderItemKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,

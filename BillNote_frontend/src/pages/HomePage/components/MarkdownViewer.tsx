@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, memo, FC } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
-import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
+import { Copy, ArrowRight, Play, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import Error from '@/components/Lottie/error.tsx'
 import Loading from '@/components/Lottie/Loading.tsx'
@@ -122,7 +122,7 @@ function createMarkdownComponents(baseURL: string) {
         </a>
       )
     },
-    img: ({ node, ...props }: any) => {
+    img: ({ ...props }: any) => {
       let src = props.src
       if (src.startsWith('/')) {
         src = baseURL + src
@@ -254,7 +254,6 @@ function createMarkdownComponents(baseURL: string) {
 }
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
-  const [copied, setCopied] = useState(false)
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [modelName, setModelName] = useState<string>('')
   const [createTime, setCreateTime] = useState<string>('')
@@ -280,7 +279,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     setModelName(currentTask.formData.model_name)
     setCreateTime(currentTask.createdAt)
     setSelectedContent(currentTask.markdown)
-  }, [currentTask?.id, taskStatus])
+  }, [currentTask, taskStatus])
 
   useEffect(() => {
     if (!currentTask?.id || status !== 'success') {
@@ -329,7 +328,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       setCopied(true)
       toast.success('已复制到剪贴板')
       setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
+    } catch {
       toast.error('复制失败')
     }
   }
@@ -402,7 +401,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
       <MarkdownHeader
-        currentTask={currentTask}
         modelName={modelName}
         onCopy={handleCopy}
         onDownload={handleDownload}

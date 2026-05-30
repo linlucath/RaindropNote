@@ -14,9 +14,8 @@ export interface DeployStatus {
     version: string | null
     gpu_name: string | null
   }
-  whisper: {
-    model_size: string
-    transcriber_type: string
+  subtitles: {
+    mode: string
   }
   ffmpeg: {
     available: boolean
@@ -26,4 +25,3 @@ export interface DeployStatus {
 export const getDeployStatus = async (): Promise<DeployStatus> => {
   return await request.get('/deploy_status')
 }
-

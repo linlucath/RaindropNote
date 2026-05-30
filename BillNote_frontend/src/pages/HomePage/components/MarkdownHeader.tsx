@@ -7,9 +7,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Badge } from '@/components/ui/badge'
 
 interface NoteHeaderProps {
-  currentTask?: {
-    markdown: string
-  }
   modelName: string
   onCopy: () => void
   onDownload: () => void
@@ -22,7 +19,6 @@ interface NoteHeaderProps {
 }
 
 export function MarkdownHeader({
-  currentTask,
   modelName,
   onCopy,
   onDownload,

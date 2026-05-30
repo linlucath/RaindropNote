@@ -71,3 +71,27 @@ test('creates a new task when the submission switches source mode', () => {
     false
   )
 })
+
+test('does not reuse the current task while that same task is still generating', () => {
+  assert.equal(
+    shouldReuseTaskForSubmission({
+      currentTaskId: 'task-1',
+      currentTask: {
+        status: 'PENDING',
+        formData: {
+          source_type: 'single',
+          uploader_source_mode: 'manual',
+          video_url: 'https://www.bilibili.com/video/BV1xx411c7mD',
+          platform: 'bilibili',
+        },
+      },
+      nextValues: {
+        source_type: 'single',
+        uploader_source_mode: 'manual',
+        video_url: 'https://www.bilibili.com/video/BV1xx411c7mD',
+        platform: 'bilibili',
+      },
+    }),
+    false
+  )
+})

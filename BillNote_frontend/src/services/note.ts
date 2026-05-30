@@ -88,7 +88,6 @@ export const generateNote = async (data: {
   video_interval?: number
   grid_size: Array<number>
   mode?: GenerationMode
-  allow_audio_transcription?: boolean
 }) => {
   try {
     console.log('generateNote', data)
@@ -171,6 +170,7 @@ export interface BatchVideo {
   video_url: string
   title?: string
   author_name?: string
+  view_count?: number
   dynamic_id?: string
   cover?: string
 }
@@ -252,7 +252,6 @@ export const startBatch = async (data: {
   video_understanding?: boolean
   video_interval?: number
   grid_size?: number[]
-  allow_audio_transcription?: boolean
 }) => {
   return await request.post('/batch/start', data)
 }
