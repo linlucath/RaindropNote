@@ -39,7 +39,7 @@ export interface Task {
   createdAt: string
   formData: {
     video_url: string
-    source_type?: 'single' | 'uploader_batch'
+    source_type?: 'single' | 'uploader_batch' | 'dynamics'
     uploader_source_mode?: 'manual' | 'followings'
     link: undefined | boolean
     screenshot: undefined | boolean
@@ -57,7 +57,6 @@ export interface Task {
     video_understanding?: boolean
     video_interval?: number
     grid_size?: number[]
-    allow_audio_transcription?: boolean
   }
 }
 

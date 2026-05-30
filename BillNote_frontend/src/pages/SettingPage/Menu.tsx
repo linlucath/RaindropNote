@@ -1,6 +1,5 @@
 import {
   BotMessageSquare,
-  Captions,
   HardDriveDownload,
   Info,
   Activity,
@@ -14,12 +13,6 @@ const Menu = () => {
       name: 'AI 模型设置',
       icon: <BotMessageSquare />,
       path: '/settings/model',
-    },
-    {
-      id: 'transcriber',
-      name: '音频转写配置',
-      icon: <Captions />,
-      path: '/settings/transcriber',
     },
     {
       id: 'download',

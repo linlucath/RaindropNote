@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useTaskStore } from '@/store/taskStore'
-import { generateNote, get_task_status, TERMINAL_TASK_STATUSES } from '@/services/note.ts'
+import { get_task_status, TERMINAL_TASK_STATUSES } from '@/services/note.ts'
 import toast from 'react-hot-toast'
 import { getTaskPollingErrorResolution } from './taskPollingErrorHandling.ts'
 
@@ -61,41 +61,7 @@ export const useTaskPolling = (interval = 3000) => {
           const initialResolution = getTaskPollingErrorResolution({
             errorCode,
             message,
-            allowAudioTranscription: task.formData?.allow_audio_transcription,
           })
-
-          if (initialResolution.shouldAskAudioTranscription) {
-            const confirmed = window.confirm(
-              '没有找到可用字幕文件。是否允许下载音频并进行转写？'
-            )
-            const resolution = getTaskPollingErrorResolution({
-              errorCode,
-              message,
-              allowAudioTranscription: task.formData?.allow_audio_transcription,
-              audioTranscriptionConfirmed: confirmed,
-            })
-
-            if (confirmed) {
-              const formData = {
-                ...task.formData,
-                allow_audio_transcription: true,
-              }
-              await generateNote({
-                ...formData,
-                task_id: task.id,
-              })
-              updateTaskContent(task.id, {
-                status: 'PENDING',
-                formData,
-              })
-              continue
-            }
-
-            if (resolution.shouldMarkFailed) {
-              updateTaskContent(task.id, { status: 'FAILED' })
-              continue
-            }
-          }
 
           if (initialResolution.shouldMarkFailed) {
             updateTaskContent(task.id, { status: 'FAILED' })

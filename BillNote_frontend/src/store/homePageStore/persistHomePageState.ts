@@ -1,0 +1,79 @@
+import type { BatchVideo, FollowingUploader } from '@/services/note.ts'
+
+export type HomePageSourceType = 'single' | 'uploader_batch' | 'dynamics'
+export type HomePageUploaderSourceMode = 'manual' | 'followings'
+export type HomePageQuality = 'fast' | 'medium' | 'slow'
+
+export interface HomePageFormState {
+  video_url: string
+  source_type: HomePageSourceType
+  uploader_source_mode: HomePageUploaderSourceMode
+  batch_limit: number
+  skip_existing: boolean
+  platform: string
+  quality: HomePageQuality
+  model_name: string
+}
+
+export interface HomePagePreviewState {
+  videos: BatchVideo[]
+  page: number
+  offset: string | null
+  hasMore: boolean
+  signature: string | null
+  selectedUploader: FollowingUploader | null
+}
+
+export interface PersistedHomePageState {
+  form: HomePageFormState
+  preview: HomePagePreviewState
+}
+
+export interface PersistedHomePageStateCandidate extends PersistedHomePageState {
+  transient?: {
+    batchLoading?: boolean
+    previewLoadingMore?: boolean
+    prefetchingFollowings?: boolean
+  }
+}
+
+export const DEFAULT_HOME_PAGE_QUALITY: HomePageQuality = 'medium'
+
+export function createDefaultHomePageFormState(modelName = ''): HomePageFormState {
+  return {
+    platform: 'bilibili',
+    source_type: 'single',
+    uploader_source_mode: 'manual',
+    video_url: '',
+    batch_limit: 0,
+    skip_existing: true,
+    quality: DEFAULT_HOME_PAGE_QUALITY,
+    model_name: modelName,
+  }
+}
+
+export function createEmptyHomePagePreviewState(): HomePagePreviewState {
+  return {
+    videos: [],
+    page: 0,
+    offset: null,
+    hasMore: false,
+    signature: null,
+    selectedUploader: null,
+  }
+}
+
+export function buildPersistedHomePageState(
+  state: PersistedHomePageStateCandidate
+): PersistedHomePageState {
+  return {
+    form: { ...state.form },
+    preview: {
+      ...state.preview,
+      videos: [...state.preview.videos],
+      selectedUploader: state.preview.selectedUploader
+        ? { ...state.preview.selectedUploader }
+        : null,
+    },
+  }
+}

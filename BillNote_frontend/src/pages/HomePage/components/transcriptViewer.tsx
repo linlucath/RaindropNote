@@ -48,13 +48,6 @@ const TranscriptViewer = ({ transcript }: TranscriptViewerProps) => {
     // Here you could add functionality to play the audio from this segment
   }
 
-  const scrollToSegment = (index: number) => {
-    segmentRefs.current[index]?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    })
-  }
-
   return (
     <div className="transcript-viewer flex h-full w-full flex-col rounded-md border bg-white p-4 shadow-sm">
       <h2 className="mb-4 text-lg font-medium">转写结果</h2>

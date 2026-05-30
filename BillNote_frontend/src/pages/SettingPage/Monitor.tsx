@@ -28,7 +28,7 @@ export default function Monitor() {
             const data = await getDeployStatus()
             setStatus(data)
             setLastUpdated(new Date())
-        } catch (err) {
+        } catch {
             setError('无法连接到后端服务')
             setStatus(null)
         } finally {
@@ -167,12 +167,12 @@ export default function Monitor() {
                         </CardContent>
                     </Card>
 
-                    {/* Whisper Model */}
+                    {/* Subtitle Mode */}
                     <Card>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                             <CardTitle className="text-lg font-medium">
                                 <AudioLines className="mr-2 inline h-5 w-5 text-purple-500" />
-                                Whisper 模型
+                                文字稿来源
                             </CardTitle>
                             {status && <StatusBadge ok={true} label="已配置" />}
                         </CardHeader>
@@ -185,12 +185,13 @@ export default function Monitor() {
                             ) : status ? (
                                 <div className="space-y-2 text-sm">
                                     <div className="flex justify-between">
-                                        <span className="text-muted-foreground">模型大小:</span>
-                                        <span className="font-medium">{status.whisper.model_size}</span>
+                                        <span className="text-muted-foreground">模式:</span>
+                                        <span className="font-medium">
+                                            {status.subtitles.mode === 'platform_only' ? '仅平台字幕' : status.subtitles.mode}
+                                        </span>
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-muted-foreground">转写引擎:</span>
-                                        <span className="font-mono">{status.whisper.transcriber_type}</span>
+                                    <div className="text-muted-foreground">
+                                        当前版本不再保留音频转写模型与下载路径。
                                     </div>
                                 </div>
                             ) : null}

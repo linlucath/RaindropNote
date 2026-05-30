@@ -38,8 +38,8 @@ const DownloaderForm = () => {
         const res = await getDownloaderCookie(id)
         const cookie = res?.cookie || ''
         form.reset({ cookie }) // ✅ 正确重置表单值
-      } catch (e) {
-        toast.error('加载 Cookie 失败: ' + e)
+      } catch (error) {
+        toast.error('加载 Cookie 失败: ' + String(error))
         form.reset({ cookie: '' }) // ❗失败时也要清空旧值
       } finally {
         setLoading(false)
@@ -47,7 +47,7 @@ const DownloaderForm = () => {
     }
 
     if (id) loadCookie()
-  }, [id]) // 🔁 每当 id 变化时触发
+  }, [form, id]) // 🔁 每当 id 变化时触发
 
   const onSubmit = async values => {
     try {
@@ -56,7 +56,7 @@ const DownloaderForm = () => {
         cookie: String(values.cookie),
       })
       toast.success('保存成功')
-    } catch (e) {
+    } catch {
       toast.error('保存失败')
     }
   }

@@ -11,6 +11,8 @@ const source = readFileSync(path.join(__dirname, 'NoteForm.tsx'), 'utf8')
 test('NoteForm no longer exposes note mode or raw transcript toggle', () => {
   assert.doesNotMatch(source, /label: '笔记'/)
   assert.doesNotMatch(source, /name="polish_transcript"/)
+  assert.doesNotMatch(source, /allow_audio_transcription/)
+  assert.doesNotMatch(source, /无字幕时允许音频转写/)
   assert.doesNotMatch(source, /FormLabel>笔记风格</)
   assert.match(source, /文字稿/)
 })
