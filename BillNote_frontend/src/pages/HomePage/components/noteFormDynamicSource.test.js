@@ -14,6 +14,28 @@ test('NoteForm exposes dynamics as a top-level source type', () => {
   assert.match(source, /label: '关注动态'/)
 })
 
+test('NoteForm renders task type with the shared select control', () => {
+  const fieldStart = source.indexOf('name="source_type"')
+  const nextSection = source.indexOf(
+    "<WorkspaceSection title={batchMode ? '1. 视频来源' : '视频来源'}>",
+    fieldStart
+  )
+  const sourceTypeField = source.slice(fieldStart, nextSection)
+
+  assert.match(sourceTypeField, /<Select[\s\S]*value=\{field\.value\}/)
+  assert.match(sourceTypeField, /<SelectTrigger className="w-full/)
+  assert.match(sourceTypeField, /<SelectItem key=\{option\.value\} value=\{option\.value\}>/)
+  assert.doesNotMatch(sourceTypeField, /grid grid-cols-3/)
+})
+
+test('NoteForm hides the batch limit control and requests all available videos', () => {
+  assert.doesNotMatch(source, /最多视频数/)
+  assert.doesNotMatch(source, /name="batch_limit"/)
+  assert.match(source, /const BATCH_LIMIT_ALL = 0/)
+  assert.match(source, /limit: BATCH_LIMIT_ALL/)
+  assert.match(source, /batchLimit: BATCH_LIMIT_ALL/)
+})
+
 test('NoteForm keeps uploader source mode focused on uploader flows', () => {
   assert.match(source, /uploader_source_mode: z\.enum\(\['manual', 'followings'\]\)/)
   assert.doesNotMatch(source, /uploader_source_mode: z\.enum\(\['manual', 'followings', 'dynamics'\]\)/)

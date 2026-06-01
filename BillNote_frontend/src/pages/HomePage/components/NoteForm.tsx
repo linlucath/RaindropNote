@@ -869,43 +869,38 @@ const NoteForm = () => {
                 name="source_type"
                 render={({ field }) => (
                   <FormItem>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { value: 'single', label: '单视频' },
-                        { value: 'uploader_batch', label: 'UP 主批量' },
-                        { value: 'dynamics', label: '关注动态' },
-                      ].map(option => {
-                        const active = field.value === option.value
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={`h-10 rounded-md border px-3 text-sm font-medium transition-colors ${
-                              active
-                                ? 'border-primary bg-primary text-white'
-                                : 'border-neutral-200 bg-neutral-50 text-neutral-700 hover:border-neutral-300 hover:bg-white'
-                            }`}
-                            onClick={() => {
-                              if (editing) {
-                                setCurrentTask(null)
-                              }
-                              field.onChange(option.value)
-                              form.setValue('video_url', '')
-                              if (
-                                option.value === 'uploader_batch' ||
-                                option.value === 'dynamics'
-                              ) {
-                                form.setValue('platform', 'bilibili')
-                                form.setValue('uploader_source_mode', 'manual')
-                              }
-                              resetPreviewUiState()
-                            }}
-                          >
+                    <Select
+                      value={field.value}
+                      onValueChange={value => {
+                        if (editing) {
+                          setCurrentTask(null)
+                        }
+                        field.onChange(value)
+                        form.setValue('video_url', '')
+                        if (value === 'uploader_batch' || value === 'dynamics') {
+                          form.setValue('platform', 'bilibili')
+                          form.setValue('uploader_source_mode', 'manual')
+                        }
+                        resetPreviewUiState()
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {[
+                          { value: 'single', label: '单视频' },
+                          { value: 'uploader_batch', label: 'UP 主批量' },
+                          { value: 'dynamics', label: '关注动态' },
+                        ].map(option => (
+                          <SelectItem key={option.value} value={option.value}>
                             {option.label}
-                          </button>
-                        )
-                      })}
-                    </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
