@@ -249,11 +249,16 @@ class UniversalGPT(GPT):
 
     def _build_polished_transcript_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
         section_guidance = self._polished_transcript_section_guidance(segments)
+        language_guidance = self._polished_transcript_language_guidance(
+            kwargs.get("language"),
+            segments,
+        )
         prompt = POLISHED_TRANSCRIPT_PROMPT.format(
             video_title=kwargs.get("title"),
             segment_text=self._build_segment_text(segments),
             tags=kwargs.get("tags"),
             section_guidance=section_guidance,
+            language_guidance=language_guidance,
         )
         return [{
             "role": "user",
@@ -265,14 +270,20 @@ class UniversalGPT(GPT):
             video_title=kwargs.get("title"),
             segment_text=self._build_segment_text(segments),
             tags=kwargs.get("tags"),
+            language_guidance=self._polished_transcript_language_guidance(
+                kwargs.get("language"),
+                segments,
+            ),
         )
         return [{
             "role": "user",
             "content": [{"type": "text", "text": prompt}]
         }]
 
-    def _build_polished_transcript_merge_messages(self, partials: list) -> list:
-        merge_text = POLISHED_TRANSCRIPT_MERGE_PROMPT + "\n\n" + "\n\n---\n\n".join(partials)
+    def _build_polished_transcript_merge_messages(self, partials: list, language: str | None = None) -> list:
+        merge_text = POLISHED_TRANSCRIPT_MERGE_PROMPT.format(
+            language_guidance=self._polished_transcript_language_guidance(language, []),
+        ) + "\n\n" + "\n\n---\n\n".join(partials)
         return [{
             "role": "user",
             "content": [{"type": "text", "text": merge_text}]
@@ -289,6 +300,10 @@ class UniversalGPT(GPT):
             segment_text=self._build_segment_text(segments),
             tags=kwargs.get("tags"),
             draft_text=draft_text,
+            language_guidance=self._polished_transcript_language_guidance(
+                kwargs.get("language"),
+                segments,
+            ),
         )
         return [{
             "role": "user",
@@ -331,6 +346,24 @@ class UniversalGPT(GPT):
         return "3-6 个 `##` 章节"
 
     @staticmethod
+    def _polished_transcript_language_guidance(language: str | None, segments: List[TranscriptSegment]) -> str:
+        normalized_language = (language or "").lower()
+        if normalized_language.startswith("zh"):
+            return "如果原字幕本身是中文，就按现有方式输出自然、完整的简体中文文字稿，不需要双语对照。 "
+
+        sample_text = " ".join((getattr(segment, "text", "") or "").strip() for segment in segments[:5]).strip()
+        has_chinese = any("\u4e00" <= char <= "\u9fff" for char in sample_text)
+        if not normalized_language and has_chinese:
+            return "如果原字幕本身是中文，就按现有方式输出自然、完整的简体中文文字稿，不需要双语对照。 "
+
+        return (
+            "如果原字幕主体不是中文，请输出双语文字稿：先输出英文原段落，下一自然段紧跟对应的中文翻译；"
+            "保持一段英文、一段中文交替出现，不要把英文和中文写在同一段里，也不要只保留中文摘要。"
+            "直接从正文开始，不要添加任何导语、编者按、说明信息或标签；"
+            "不要写“以下是整理后的双语文字稿”“英文原文：”“中文翻译：”之类的字样。"
+        )
+
+    @staticmethod
     def _strip_markdown_for_length(text: str) -> str:
         cleaned = text or ""
         replacements = (
@@ -366,6 +399,7 @@ class UniversalGPT(GPT):
             draft_text,
             title=source.title,
             tags=source.tags,
+            language=source.language,
         )
         response = self._chat_completion_create(messages)
         repaired = (response.choices[0].message.content or "").strip()
@@ -410,27 +444,42 @@ class UniversalGPT(GPT):
             chunks.extend(byte_chunker.chunk(group, [], title=title, tags=tags))
         return chunks
 
-    def _repair_polished_transcript_segments(self, segments: List[TranscriptSegment], draft_text: str, title: str, tags) -> str:
+    def _repair_polished_transcript_segments(
+        self,
+        segments: List[TranscriptSegment],
+        draft_text: str,
+        title: str,
+        tags,
+        language: str | None,
+    ) -> str:
         messages = self._build_polished_transcript_repair_messages(
             segments,
             draft_text,
             title=title,
             tags=tags,
+            language=language,
         )
         response = self._chat_completion_create(messages)
         repaired = (response.choices[0].message.content or "").strip()
         return repaired or draft_text
 
-    def _polish_transcript_chunk(self, chunk, title: str, tags) -> str:
+    def _polish_transcript_chunk(self, chunk, title: str, tags, language: str | None) -> str:
         messages = self._build_polished_transcript_chunk_messages(
             chunk.segments,
             title=title,
             tags=tags,
+            language=language,
         )
         response = self._chat_completion_create(messages)
         draft = (response.choices[0].message.content or "").strip()
         if draft and self._needs_polished_transcript_repair(chunk.segments, draft):
-            return self._repair_polished_transcript_segments(chunk.segments, draft, title, tags)
+            return self._repair_polished_transcript_segments(
+                chunk.segments,
+                draft,
+                title,
+                tags,
+                language,
+            )
         return draft
 
     @staticmethod
@@ -693,7 +742,13 @@ class UniversalGPT(GPT):
         max_workers = min(self._polished_transcript_max_workers(), max(1, len(chunks)))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(self._polish_transcript_chunk, chunk, source.title, source.tags): idx
+                executor.submit(
+                    self._polish_transcript_chunk,
+                    chunk,
+                    source.title,
+                    source.tags,
+                    source.language,
+                ): idx
                 for idx, chunk in enumerate(chunks)
             }
             for future in as_completed(futures):

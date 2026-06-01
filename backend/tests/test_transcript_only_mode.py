@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app.enmus.note_enums import DownloadQuality
 from app.models.audio_model import AudioDownloadResult
@@ -36,6 +36,12 @@ def _subtitle_transcript():
     return transcript
 
 
+def _youtube_subtitle_transcript():
+    transcript = _transcript()
+    transcript.raw = {"source": "youtube_transcript_api", "language_code": "en"}
+    return transcript
+
+
 def _audio_transcript():
     transcript = _transcript()
     transcript.raw = {"source": "audio_transcription"}
@@ -63,7 +69,6 @@ class TestTranscriptOnlyMode(unittest.TestCase):
         generator._get_downloader = Mock(return_value=downloader)
         generator._get_gpt = Mock(side_effect=AssertionError("GPT should not be used"))
         generator._download_media = Mock(return_value=_audio_meta())
-        generator._get_transcript = Mock(side_effect=AssertionError("audio transcription should not be used"))
         generator._summarize_text = Mock(side_effect=AssertionError("summary should not be used"))
         generator._save_metadata = Mock()
 
@@ -78,7 +83,6 @@ class TestTranscriptOnlyMode(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("## 简体中文文字稿", result.markdown)
         generator._get_gpt.assert_not_called()
-        generator._get_transcript.assert_not_called()
         generator._summarize_text.assert_not_called()
         generator._save_metadata.assert_called_once_with(
             video_id="BV123",
@@ -98,7 +102,6 @@ class TestTranscriptOnlyMode(unittest.TestCase):
         gpt.polish_transcript.return_value = "这是校对后的字幕文字稿。"
         generator._get_gpt = Mock(return_value=gpt)
         generator._download_media = Mock(return_value=_audio_meta())
-        generator._get_transcript = Mock(side_effect=AssertionError("audio transcription should not be used"))
         generator._summarize_text = Mock(side_effect=AssertionError("summary should not be used"))
         generator._save_metadata = Mock()
 
@@ -115,22 +118,19 @@ class TestTranscriptOnlyMode(unittest.TestCase):
         self.assertIn("这是校对后的字幕文字稿。", result.markdown)
         self.assertNotIn("## 带时间戳文字稿", result.markdown)
         gpt.polish_transcript.assert_called_once()
-        generator._get_transcript.assert_not_called()
         generator._summarize_text.assert_not_called()
 
-    def test_polished_transcript_mode_uses_gpt_for_audio_transcription(self):
+    def test_polished_transcript_mode_fails_without_platform_subtitles(self):
         generator = NoteGenerator.__new__(NoteGenerator)
         generator.video_img_urls = []
         generator.video_path = None
         generator._update_status = Mock()
         downloader = Mock()
-        downloader.download_subtitles.return_value = _audio_transcript()
+        downloader.download_subtitles.return_value = None
         generator._get_downloader = Mock(return_value=downloader)
         gpt = Mock()
-        gpt.polish_transcript.return_value = "这个视频讲学习。\n\n后面还补充了一个观点。"
         generator._get_gpt = Mock(return_value=gpt)
-        generator._download_media = Mock(return_value=_audio_meta())
-        generator._get_transcript = Mock(side_effect=AssertionError("audio transcription should not be used"))
+        generator._download_media = Mock(side_effect=AssertionError("should not download media"))
         generator._summarize_text = Mock(side_effect=AssertionError("summary should not be used"))
         generator._save_metadata = Mock()
 
@@ -144,13 +144,75 @@ class TestTranscriptOnlyMode(unittest.TestCase):
             mode="polished_transcript",
         )
 
-        self.assertIsNotNone(result)
-        self.assertIn("## 校对文字稿", result.markdown)
-        self.assertIn("这个视频讲学习。\n\n后面还补充了一个观点。", result.markdown)
-        self.assertNotIn("## 带时间戳文字稿", result.markdown)
-        gpt.polish_transcript.assert_called_once()
-        generator._get_transcript.assert_not_called()
+        self.assertIsNone(result)
+        generator._download_media.assert_not_called()
+        gpt.polish_transcript.assert_not_called()
         generator._summarize_text.assert_not_called()
+
+    def test_youtube_polished_transcript_mode_does_not_probe_media_when_subtitles_exist(self):
+        generator = NoteGenerator.__new__(NoteGenerator)
+        generator.video_img_urls = []
+        generator.video_path = None
+        generator._update_status = Mock()
+        downloader = Mock()
+        downloader.download_subtitles.return_value = _youtube_subtitle_transcript()
+        generator._get_downloader = Mock(return_value=downloader)
+        gpt = Mock()
+        gpt.polish_transcript.return_value = "polished subtitle text"
+        generator._get_gpt = Mock(return_value=gpt)
+        generator._download_media = Mock(side_effect=AssertionError("should not probe media"))
+        generator._summarize_text = Mock(side_effect=AssertionError("summary should not be used"))
+        generator._save_metadata = Mock()
+
+        result = generator.generate(
+            video_url="https://www.youtube.com/watch?v=Q2um0Vvmtj0",
+            platform="youtube",
+            quality=DownloadQuality.fast,
+            task_id="youtube-subtitle-only-task",
+            model_name="demo-model",
+            provider_id="demo-provider",
+            mode="polished_transcript",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.audio_meta.platform, "youtube")
+        self.assertEqual(result.audio_meta.video_id, "Q2um0Vvmtj0")
+        self.assertEqual(result.audio_meta.file_path, "")
+        generator._download_media.assert_not_called()
+        gpt.polish_transcript.assert_called_once()
+
+    def test_youtube_subtitle_only_meta_fetches_title_without_media_probe(self):
+        generator = NoteGenerator.__new__(NoteGenerator)
+        generator.video_img_urls = []
+        generator.video_path = None
+        generator._update_status = Mock()
+        downloader = Mock()
+        downloader.download_subtitles.return_value = _youtube_subtitle_transcript()
+        generator._get_downloader = Mock(return_value=downloader)
+        gpt = Mock()
+        gpt.polish_transcript.return_value = "polished subtitle text"
+        generator._get_gpt = Mock(return_value=gpt)
+        generator._download_media = Mock(side_effect=AssertionError("should not probe media"))
+        generator._summarize_text = Mock(side_effect=AssertionError("summary should not be used"))
+        generator._save_metadata = Mock()
+
+        with patch("app.services.note.NoteGenerator._fetch_video_title", return_value="Warm People") as fetch_title:
+            result = generator.generate(
+                video_url="https://www.youtube.com/watch?v=Q2um0Vvmtj0",
+                platform="youtube",
+                quality=DownloadQuality.fast,
+                task_id="youtube-subtitle-title-task",
+                model_name="demo-model",
+                provider_id="demo-provider",
+                mode="polished_transcript",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.audio_meta.title, "Warm People")
+        fetch_title.assert_called_once_with(
+            "https://www.youtube.com/watch?v=Q2um0Vvmtj0",
+            "youtube",
+        )
 
 
 if __name__ == "__main__":

@@ -107,7 +107,6 @@ class TestTaskCancelFlow(unittest.TestCase):
                     quality=DownloadQuality.fast,
                     task_id='queued-task',
                     mode='transcript',
-                    allow_audio_transcription=True,
                     output_path='/tmp',
                 )
                 payload = read_task_status(task_id='queued-task', output_dir=output_dir)

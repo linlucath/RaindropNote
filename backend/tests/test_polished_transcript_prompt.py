@@ -53,6 +53,33 @@ class TestPolishedTranscriptPrompt(unittest.TestCase):
         self.assertIn("不要另写总结式结尾", prompt)
         self.assertIn("不要把它重新组织成议论文", prompt)
 
+    def test_non_chinese_polished_transcript_prompt_requires_bilingual_paragraph_pairs(self):
+        gpt = UniversalGPT(client=Mock(), model="demo")
+        messages = gpt._build_polished_transcript_messages(
+            [TranscriptSegment(start=0, end=1, text="hello world")],
+            title="English video",
+            tags=[],
+            language="en",
+        )
+
+        prompt = messages[0]["content"][0]["text"]
+        self.assertIn("先输出英文原段落", prompt)
+        self.assertIn("下一自然段紧跟对应的中文翻译", prompt)
+        self.assertIn("不要把英文和中文写在同一段里", prompt)
+        self.assertIn("不要添加任何导语、编者按、说明信息或标签", prompt)
+
+    def test_chinese_polished_transcript_prompt_does_not_require_bilingual_output(self):
+        gpt = UniversalGPT(client=Mock(), model="demo")
+        messages = gpt._build_polished_transcript_messages(
+            [TranscriptSegment(start=0, end=1, text="你好，世界")],
+            title="中文视频",
+            tags=[],
+            language="zh",
+        )
+
+        prompt = messages[0]["content"][0]["text"]
+        self.assertNotIn("先输出英文原段落", prompt)
+
     def test_polished_transcript_stitches_multiple_chunks_without_merge_prompt(self):
         gpt = UniversalGPT(client=Mock(), model="demo")
         gpt.max_request_bytes = 2500

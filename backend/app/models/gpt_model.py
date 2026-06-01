@@ -9,6 +9,7 @@ class GPTSource:
     segment: Union[List[TranscriptSegment], List]
     title: str
     tags:str
+    language: Optional[str] = None
     screenshot: Optional[bool] = False
     link: Optional[bool] = False
     style: Optional[str] = None
@@ -16,4 +17,3 @@ class GPTSource:
     _format: Optional[list] = None
     video_img_urls:  Optional[list] = None
     checkpoint_key: Optional[str] = None
-

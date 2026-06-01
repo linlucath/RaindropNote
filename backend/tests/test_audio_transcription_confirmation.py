@@ -76,7 +76,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                     if checkpoint == 'after_parsing':
                         generator._get_downloader = Mock(side_effect=lambda _platform: (cancel_now(), downloader)[1])
                         generator._download_media = Mock(side_effect=AssertionError('should not download media'))
-                        generator._transcribe_audio = Mock(side_effect=AssertionError('should not transcribe'))
+                        generator._get_transcript = Mock(side_effect=AssertionError('should not get transcript'))
                         generator._summarize_text = Mock(side_effect=AssertionError('should not summarize'))
                     else:
                         generator._get_downloader = Mock(return_value=downloader)
@@ -86,7 +86,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                                 cancel_now()
                             return _audio_meta()
 
-                        def transcribe_audio(**_kwargs):
+                        def get_transcript(**_kwargs):
                             if checkpoint == 'after_transcription':
                                 cancel_now()
                             return _transcript()
@@ -102,7 +102,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                             return '# 标题\n\n## 简体中文文字稿\n\n已有字幕'
 
                         generator._download_media = Mock(side_effect=download_media)
-                        generator._transcribe_audio = Mock(side_effect=transcribe_audio)
+                        generator._get_transcript = Mock(side_effect=get_transcript)
                         generator._summarize_text = Mock(side_effect=summarize_text)
                         generator._build_transcript_markdown = Mock(side_effect=build_transcript_markdown)
 
@@ -115,7 +115,6 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                             model_name='demo-model',
                             provider_id='demo-provider',
                             mode=mode,
-                            allow_audio_transcription=True,
                             output_path='/tmp',
                         )
                     finally:
@@ -128,7 +127,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                     )
                     generator._save_metadata.assert_not_called()
 
-    def test_generate_requires_confirmation_before_audio_transcription(self):
+    def test_generate_fails_when_platform_subtitles_are_unavailable(self):
         generator = NoteGenerator.__new__(NoteGenerator)
         generator.video_img_urls = []
         generator.video_path = None
@@ -138,7 +137,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
         generator._get_downloader = Mock(return_value=downloader)
         generator._get_gpt = Mock(return_value=Mock())
         generator._download_media = Mock(side_effect=AssertionError("should not download media"))
-        generator._transcribe_audio = Mock(side_effect=AssertionError("should not transcribe"))
+        generator._get_transcript = Mock(side_effect=AssertionError("should not get transcript"))
         generator._save_metadata = Mock()
 
         result = generator.generate(
@@ -154,15 +153,15 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
 
         self.assertIsNone(result)
         generator._download_media.assert_not_called()
-        generator._transcribe_audio.assert_not_called()
+        generator._get_transcript.assert_not_called()
         generator._update_status.assert_any_call(
             "needs-confirmation",
             TaskStatus.FAILED,
-            message=NoteGenerator.AUDIO_TRANSCRIPTION_CONFIRMATION_MESSAGE,
+            message=NoteGenerator.SUBTITLE_REQUIRED_MESSAGE,
             platform='bilibili',
         )
 
-    def test_generate_ignores_audio_transcription_cache_without_confirmation(self):
+    def test_generate_ignores_cached_audio_transcription_results(self):
         generator = NoteGenerator.__new__(NoteGenerator)
         generator.video_img_urls = []
         generator.video_path = None
@@ -172,7 +171,7 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
         generator._get_downloader = Mock(return_value=downloader)
         generator._get_gpt = Mock(return_value=Mock())
         generator._download_media = Mock(side_effect=AssertionError("should not download media"))
-        generator._transcribe_audio = Mock(side_effect=AssertionError("should not transcribe"))
+        generator._get_transcript = Mock(side_effect=AssertionError("should not get transcript"))
         generator._save_metadata = Mock()
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -206,9 +205,9 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
 
         self.assertIsNone(result)
         generator._download_media.assert_not_called()
-        generator._transcribe_audio.assert_not_called()
+        generator._get_transcript.assert_not_called()
 
-    def test_generate_transcribes_audio_after_confirmation(self):
+    def test_generate_does_not_accept_audio_transcription_even_when_requested(self):
         generator = NoteGenerator.__new__(NoteGenerator)
         generator.video_img_urls = []
         generator.video_path = None
@@ -217,8 +216,8 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
         downloader.download_subtitles.return_value = None
         generator._get_downloader = Mock(return_value=downloader)
         generator._get_gpt = Mock(side_effect=AssertionError("GPT should not be used"))
-        generator._download_media = Mock(return_value=_audio_meta())
-        generator._transcribe_audio = Mock(return_value=_transcript())
+        generator._download_media = Mock(side_effect=AssertionError("should not download media"))
+        generator._get_transcript = Mock(side_effect=AssertionError("should not get transcript"))
         generator._save_metadata = Mock()
 
         result = generator.generate(
@@ -227,17 +226,12 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
             quality=DownloadQuality.fast,
             task_id="confirmed",
             mode="transcript",
-            allow_audio_transcription=True,
             output_path="/tmp",
         )
 
-        self.assertIsNotNone(result)
-        self.assertIn("## 简体中文文字稿", result.markdown)
-        generator._download_media.assert_called_once()
-        self.assertFalse(generator._download_media.call_args.kwargs["skip_download"])
-        generator._transcribe_audio.assert_called_once()
-        transcript_cache_file = generator._transcribe_audio.call_args.kwargs["transcript_cache_file"]
-        self.assertEqual(transcript_cache_file, Path("note_results") / "confirmed_transcript.json")
+        self.assertIsNone(result)
+        generator._download_media.assert_not_called()
+        generator._get_transcript.assert_not_called()
 
 
 if __name__ == "__main__":
