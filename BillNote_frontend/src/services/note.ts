@@ -169,6 +169,7 @@ export interface BatchVideo {
   video_id: string
   video_url: string
   title?: string
+  platform?: string
   author_name?: string
   view_count?: number
   dynamic_id?: string

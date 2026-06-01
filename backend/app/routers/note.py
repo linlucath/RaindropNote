@@ -59,7 +59,6 @@ class VideoRequest(BaseModel):
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
     mode: Optional[str] = SUPPORTED_GENERATION_MODE
-    allow_audio_transcription: Optional[bool] = False
 
     @field_validator("video_url")
     def validate_supported_url(cls, v):
@@ -210,7 +209,7 @@ def save_note_to_file(task_id: str, note):
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[], mode: str = SUPPORTED_GENERATION_MODE, allow_audio_transcription: bool = False
+                  video_interval=0, grid_size=[], mode: str = SUPPORTED_GENERATION_MODE
                   ):
     mode = _normalize_generation_mode(mode)
 
@@ -234,7 +233,6 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_interval=video_interval,
             grid_size=grid_size,
             mode=mode,
-            allow_audio_transcription=allow_audio_transcription,
         )
 
     executor = get_task_executor(mode)
@@ -311,7 +309,7 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                   data.extras, data.video_understanding, data.video_interval, data.grid_size,
-                                  _normalize_generation_mode(data.mode), data.allow_audio_transcription or False)
+                                  _normalize_generation_mode(data.mode))
         return R.success({"task_id": task_id})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

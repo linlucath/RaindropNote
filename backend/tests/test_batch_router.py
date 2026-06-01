@@ -3,13 +3,111 @@ import tempfile
 import unittest
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.enmus.task_status_enums import TaskStatus
 from app.routers import batch
+
+
+def _build_youtube_channel_page_html(*, videos: list[dict], continuation_token: str | None = None) -> str:
+    rich_contents = []
+    for video in videos:
+        rich_contents.append({
+            "richItemRenderer": {
+                "content": {
+                    "lockupViewModel": {
+                        "contentId": video["video_id"],
+                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                        "metadata": {
+                            "lockupMetadataViewModel": {
+                                "title": {"content": video["title"]},
+                                "metadata": {
+                                    "contentMetadataViewModel": {
+                                        "metadataRows": [{
+                                            "metadataParts": [
+                                                {"text": {"content": video["view_text"]}},
+                                                {"text": {"content": video.get("published_text") or "1天前"}},
+                                            ]
+                                        }]
+                                    }
+                                }
+                            }
+                        },
+                        "rendererContext": {
+                            "commandContext": {
+                                "onTap": {
+                                    "innertubeCommand": {
+                                        "watchEndpoint": {"videoId": video["video_id"]}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+    if continuation_token:
+        rich_contents.append({
+            "continuationItemRenderer": {
+                "continuationEndpoint": {
+                    "continuationCommand": {"token": continuation_token}
+                }
+            }
+        })
+
+    payload = {
+        "contents": {
+            "twoColumnBrowseResultsRenderer": {
+                "tabs": [
+                    {},
+                    {
+                        "tabRenderer": {
+                            "content": {
+                                "richGridRenderer": {
+                                    "header": {
+                                        "chipBarViewModel": {
+                                            "chips": [
+                                                {"chipViewModel": {"text": "最新", "selected": True}},
+                                                {"chipViewModel": {"text": "最热门", "selected": False}},
+                                                {"chipViewModel": {"text": "最早", "selected": False}},
+                                            ]
+                                        }
+                                    },
+                                    "contents": rich_contents,
+                                }
+                            }
+                        }
+                    },
+                ]
+            }
+        }
+    }
+    config = {
+        "INNERTUBE_API_KEY": "test-api-key",
+        "INNERTUBE_CLIENT_VERSION": "2.20260529.01.00",
+        "VISITOR_DATA": "visitor-data",
+        "INNERTUBE_CONTEXT": {
+            "client": {
+                "clientName": "WEB",
+                "clientVersion": "2.20260529.01.00",
+                "hl": "zh-CN",
+                "gl": "JP",
+                "visitorData": "visitor-data",
+                "originalUrl": "https://www.youtube.com/@NewelOfKnowledge/videos?view=0&sort=p&flow=grid",
+            },
+            "request": {"useSsl": True},
+        },
+    }
+    return (
+        "<html><head>"
+        f"<script>ytcfg.set({json.dumps(config, ensure_ascii=False)});</script>"
+        f"<script>var ytInitialData = {json.dumps(payload, ensure_ascii=False)};</script>"
+        "</head><body></body></html>"
+    )
 
 
 class TestBatchRouter(unittest.TestCase):
@@ -33,13 +131,44 @@ class TestBatchRouter(unittest.TestCase):
                 "video_id": "BV123",
                 "video_url": "https://www.bilibili.com/video/BV123",
                 "title": "",
+                "platform": "bilibili",
             },
             {
                 "video_id": "BV456",
                 "video_url": "https://www.bilibili.com/video/BV456",
                 "title": "",
+                "platform": "bilibili",
             },
         ])
+
+    def test_normalizes_youtube_entries_and_sorts_by_view_count_desc(self):
+        videos = batch.normalize_youtube_entries([
+            {
+                "id": "yt-1",
+                "url": "https://www.youtube.com/watch?v=yt-1",
+                "title": "Video 1",
+                "channel": "Channel A",
+                "view_count": 1200,
+            },
+            {
+                "id": "yt-2",
+                "url": "https://www.youtube.com/watch?v=yt-2",
+                "title": "Video 2",
+                "channel": "Channel A",
+                "view_count": 9800,
+            },
+            {
+                "id": "yt-3",
+                "url": "https://www.youtube.com/watch?v=yt-3",
+                "title": "Video 3",
+                "channel": "Channel A",
+                "view_count": 3600,
+            },
+        ])
+
+        self.assertEqual([item["video_id"] for item in videos], ["yt-2", "yt-3", "yt-1"])
+        self.assertEqual(videos[0]["author_name"], "Channel A")
+        self.assertEqual(videos[0]["view_count"], 9800)
 
     def test_preview_limits_videos(self):
         with patch("app.routers.batch._extract_flat_playlist", return_value={
@@ -49,7 +178,7 @@ class TestBatchRouter(unittest.TestCase):
                 {"id": "BV3"},
             ]
         }):
-            videos = batch.preview_bilibili_space("https://space.bilibili.com/1/upload/video", limit=2)
+            videos = batch.preview_bilibili_space("https://example.com/videos", limit=2)
 
         self.assertEqual([v["video_id"] for v in videos], ["BV1", "BV2"])
 
@@ -60,7 +189,7 @@ class TestBatchRouter(unittest.TestCase):
                 {"id": "BV2", "title": "已有标题"},
             ]
         }), patch("app.routers.batch._extract_video_metadata", return_value={"title": "补全标题"}) as extract_video:
-            videos = batch.preview_bilibili_space("https://space.bilibili.com/1/upload/video", limit=2)
+            videos = batch.preview_bilibili_space("https://example.com/videos", limit=2)
 
         self.assertEqual(videos[0]["title"], "补全标题")
         self.assertEqual(videos[1]["title"], "已有标题")
@@ -89,7 +218,7 @@ class TestBatchRouter(unittest.TestCase):
             ]
         }) as extract_playlist:
             payload = batch.preview_bilibili_space_page(
-                "https://space.bilibili.com/1/upload/video",
+                "https://example.com/videos",
                 page=1,
                 page_size=2,
                 limit=0,
@@ -98,7 +227,7 @@ class TestBatchRouter(unittest.TestCase):
         self.assertEqual([v["video_id"] for v in payload["items"]], ["BV1", "BV2"])
         self.assertTrue(payload["has_more"])
         extract_playlist.assert_called_once_with(
-            "https://space.bilibili.com/1/upload/video",
+            "https://example.com/videos",
             start=1,
             end=3,
         )
@@ -112,7 +241,7 @@ class TestBatchRouter(unittest.TestCase):
             ]
         }) as extract_playlist:
             payload = batch.preview_bilibili_space_page(
-                "https://space.bilibili.com/1/upload/video",
+                "https://example.com/videos",
                 page=3,
                 page_size=20,
                 limit=42,
@@ -121,10 +250,546 @@ class TestBatchRouter(unittest.TestCase):
         self.assertEqual([v["video_id"] for v in payload["items"]], ["BV41", "BV42"])
         self.assertFalse(payload["has_more"])
         extract_playlist.assert_called_once_with(
-            "https://space.bilibili.com/1/upload/video",
+            "https://example.com/videos",
             start=41,
             end=42,
         )
+
+    def test_preview_page_uses_uploader_api_for_bilibili_space_urls(self):
+        uploader_service = Mock()
+        uploader_service.get_uploader_videos_page.return_value = {
+            "items": [
+                {
+                    "video_id": "BV1",
+                    "video_url": "https://www.bilibili.com/video/BV1",
+                    "title": "视频1",
+                }
+            ],
+            "page": 1,
+            "page_size": 2,
+            "has_more": True,
+            "total": None,
+        }
+
+        with patch.object(batch, "_uploader_video_service", uploader_service, create=True), \
+                patch("app.routers.batch._extract_flat_playlist") as extract_playlist:
+            batch.preview_bilibili_space_page(
+                "https://space.bilibili.com/1/upload/video",
+                page=1,
+                page_size=2,
+                limit=42,
+            )
+
+        uploader_service.get_uploader_videos_page.assert_called_once_with(
+            mid="1",
+            page=1,
+            page_size=2,
+            limit=42,
+            order="click",
+        )
+        extract_playlist.assert_not_called()
+
+    def test_batch_preview_uses_popular_chip_continuation_for_first_youtube_page(self):
+        response = Mock()
+        response.text = (
+            "<html><head>"
+            "<script>ytcfg.set("
+            + json.dumps({
+                "INNERTUBE_API_KEY": "test-api-key",
+                "INNERTUBE_CLIENT_VERSION": "2.20260529.01.00",
+                "VISITOR_DATA": "visitor-data",
+                "INNERTUBE_CONTEXT": {
+                    "client": {
+                        "clientName": "WEB",
+                        "clientVersion": "2.20260529.01.00",
+                        "hl": "zh-CN",
+                        "gl": "JP",
+                        "visitorData": "visitor-data",
+                        "originalUrl": "https://www.youtube.com/@NewelOfKnowledge/videos?view=0&sort=p&flow=grid",
+                    },
+                    "request": {"useSsl": True},
+                },
+            }, ensure_ascii=False)
+            + ");</script>"
+            "<script>var ytInitialData = "
+            + json.dumps({
+                "contents": {
+                    "twoColumnBrowseResultsRenderer": {
+                        "tabs": [
+                            {},
+                            {
+                                "tabRenderer": {
+                                    "content": {
+                                        "richGridRenderer": {
+                                            "header": {
+                                                "chipBarViewModel": {
+                                                    "chips": [
+                                                        {"chipViewModel": {"text": "最新", "selected": True}},
+                                                        {
+                                                            "chipViewModel": {
+                                                                "text": "最热门",
+                                                                "selected": False,
+                                                                "tapCommand": {
+                                                                    "innertubeCommand": {
+                                                                        "continuationCommand": {
+                                                                            "token": "popular-chip-token"
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        },
+                                                    ]
+                                                }
+                                            },
+                                            "contents": [
+                                                {
+                                                    "richItemRenderer": {
+                                                        "content": {
+                                                            "lockupViewModel": {
+                                                                "contentId": "recent-1",
+                                                                "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                                                                "metadata": {
+                                                                    "lockupMetadataViewModel": {
+                                                                        "title": {"content": "最近发布视频"},
+                                                                        "metadata": {
+                                                                            "contentMetadataViewModel": {
+                                                                                "metadataRows": [{
+                                                                                    "metadataParts": [
+                                                                                        {"text": {"content": "100次观看"}},
+                                                                                        {"text": {"content": "1天前"}},
+                                                                                    ]
+                                                                                }]
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                }
+            }, ensure_ascii=False)
+            + ";</script></head><body></body></html>"
+        )
+        response.raise_for_status.return_value = None
+
+        continuation_response = Mock()
+        continuation_response.raise_for_status.return_value = None
+        continuation_response.json.return_value = {
+            "onResponseReceivedActions": [{
+                "appendContinuationItemsAction": {
+                    "continuationItems": [
+                        {
+                            "richItemRenderer": {
+                                "content": {
+                                    "lockupViewModel": {
+                                        "contentId": "popular-1",
+                                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                                        "metadata": {
+                                            "lockupMetadataViewModel": {
+                                                "title": {"content": "热门视频 1"},
+                                                "metadata": {
+                                                    "contentMetadataViewModel": {
+                                                        "metadataRows": [{
+                                                            "metadataParts": [
+                                                                {"text": {"content": "88万次观看"}},
+                                                                {"text": {"content": "1年前"}},
+                                                            ]
+                                                        }]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "richItemRenderer": {
+                                "content": {
+                                    "lockupViewModel": {
+                                        "contentId": "popular-2",
+                                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                                        "metadata": {
+                                            "lockupMetadataViewModel": {
+                                                "title": {"content": "热门视频 2"},
+                                                "metadata": {
+                                                    "contentMetadataViewModel": {
+                                                        "metadataRows": [{
+                                                            "metadataParts": [
+                                                                {"text": {"content": "42万次观看"}},
+                                                                {"text": {"content": "2年前"}},
+                                                            ]
+                                                        }]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    ]
+                }
+            }]
+        }
+
+        with patch("app.routers.batch.requests.get", return_value=response), \
+                patch("app.routers.batch.requests.post", return_value=continuation_response) as requests_post:
+            payload = batch.preview_bilibili_space_page(
+                "https://www.youtube.com/@NewelOfKnowledge",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual([item["video_id"] for item in payload["items"]], ["popular-1", "popular-2"])
+        self.assertEqual(payload["items"][0]["view_count"], 880000)
+        self.assertEqual(
+            requests_post.call_args.kwargs["json"]["continuation"],
+            "popular-chip-token",
+        )
+
+    def test_batch_preview_uses_popular_continuation_across_pages_instead_of_sorting_current_page_only(self):
+        response = Mock()
+        response.text = (
+            "<html><head>"
+            "<script>ytcfg.set("
+            + json.dumps({
+                "INNERTUBE_API_KEY": "test-api-key",
+                "INNERTUBE_CLIENT_VERSION": "2.20260529.01.00",
+                "VISITOR_DATA": "visitor-data",
+                "INNERTUBE_CONTEXT": {
+                    "client": {
+                        "clientName": "WEB",
+                        "clientVersion": "2.20260529.01.00",
+                        "hl": "zh-CN",
+                        "gl": "JP",
+                        "visitorData": "visitor-data",
+                    },
+                    "request": {"useSsl": True},
+                },
+            }, ensure_ascii=False)
+            + ");</script>"
+            "<script>var ytInitialData = "
+            + json.dumps({
+                "contents": {
+                    "twoColumnBrowseResultsRenderer": {
+                        "tabs": [
+                            {},
+                            {
+                                "tabRenderer": {
+                                    "content": {
+                                        "richGridRenderer": {
+                                            "header": {
+                                                "chipBarViewModel": {
+                                                    "chips": [
+                                                        {"chipViewModel": {"text": "最新", "selected": True}},
+                                                        {
+                                                            "chipViewModel": {
+                                                                "text": "最热门",
+                                                                "selected": False,
+                                                                "tapCommand": {
+                                                                    "innertubeCommand": {
+                                                                        "continuationCommand": {
+                                                                            "token": "popular-chip-token"
+                                                                        }
+                                                                    }
+                                                                },
+                                                            }
+                                                        },
+                                                    ]
+                                                }
+                                            },
+                                            "contents": [],
+                                        }
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                }
+            }, ensure_ascii=False)
+            + ";</script></head><body></body></html>"
+        )
+        response.raise_for_status.return_value = None
+
+        popular_page_response = Mock()
+        popular_page_response.raise_for_status.return_value = None
+        popular_page_response.json.return_value = {
+            "onResponseReceivedActions": [
+                {"reloadContinuationItemsCommand": {"continuationItems": []}},
+                {
+                    "reloadContinuationItemsCommand": {
+                        "continuationItems": [
+                            *[
+                                {
+                                    "richItemRenderer": {
+                                        "content": {
+                                            "lockupViewModel": {
+                                                "contentId": f"popular-{index}",
+                                                "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                                                "metadata": {
+                                                    "lockupMetadataViewModel": {
+                                                        "title": {"content": f"热门视频 {index}"},
+                                                        "metadata": {
+                                                            "contentMetadataViewModel": {
+                                                                "metadataRows": [{
+                                                                    "metadataParts": [
+                                                                        {"text": {"content": f"{100 - index}万次观看"}},
+                                                                        {"text": {"content": "1年前"}},
+                                                                    ]
+                                                                }]
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                for index in range(1, 31)
+                            ],
+                            {
+                                "continuationItemRenderer": {
+                                    "continuationEndpoint": {
+                                        "continuationCommand": {"token": "next-popular-page-token"}
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                },
+            ]
+        }
+
+        continuation_response = Mock()
+        continuation_response.raise_for_status.return_value = None
+        continuation_response.json.return_value = {
+            "onResponseReceivedActions": [{
+                "reloadContinuationItemsCommand": {
+                    "continuationItems": [
+                        {
+                            "richItemRenderer": {
+                                "content": {
+                                    "lockupViewModel": {
+                                        "contentId": f"popular-{index}",
+                                        "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+                                        "metadata": {
+                                            "lockupMetadataViewModel": {
+                                                "title": {"content": f"热门视频 {index}"},
+                                                "metadata": {
+                                                    "contentMetadataViewModel": {
+                                                        "metadataRows": [{
+                                                            "metadataParts": [
+                                                                {"text": {"content": f"{100 - index}万次观看"}},
+                                                                {"text": {"content": "2年前"}},
+                                                            ]
+                                                        }]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        for index in range(31, 61)
+                    ]
+                }
+            }]
+        }
+
+        with patch("app.routers.batch.requests.get", return_value=response), \
+                patch(
+                    "app.routers.batch.requests.post",
+                    side_effect=[popular_page_response, continuation_response],
+                ) as requests_post:
+            payload = batch.preview_bilibili_space_page(
+                "https://www.youtube.com/@NewelOfKnowledge",
+                page=2,
+                page_size=20,
+                limit=0,
+            )
+
+        self.assertEqual(
+            [item["video_id"] for item in payload["items"]],
+            [f"popular-{index}" for index in range(21, 41)],
+        )
+        self.assertEqual(
+            [call.kwargs["json"]["continuation"] for call in requests_post.call_args_list],
+            ["popular-chip-token", "next-popular-page-token"],
+        )
+
+    def test_batch_preview_supports_youtube_handle_urls(self):
+        response = Mock()
+        response.text = _build_youtube_channel_page_html(
+            videos=[
+                {
+                    "video_id": "yt-1",
+                    "title": "第一条 YouTube 视频",
+                    "view_text": "12万次观看",
+                },
+                {
+                    "video_id": "yt-2",
+                    "title": "第二条 YouTube 视频",
+                    "view_text": "8.9万次观看",
+                },
+            ],
+            continuation_token="next-page-token",
+        )
+        response.raise_for_status.return_value = None
+
+        with patch("app.routers.batch.requests.get", return_value=response) as requests_get, \
+                patch("app.routers.batch._extract_flat_playlist") as extract_playlist:
+            payload = batch.preview_bilibili_space_page(
+                "https://www.youtube.com/@NewelOfKnowledge",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual(
+            payload["items"],
+            [
+                {
+                    "video_id": "yt-1",
+                    "video_url": "https://www.youtube.com/watch?v=yt-1",
+                    "title": "第一条 YouTube 视频",
+                    "author_name": "",
+                    "view_count": 120000,
+                    "platform": "youtube",
+                },
+                {
+                    "video_id": "yt-2",
+                    "video_url": "https://www.youtube.com/watch?v=yt-2",
+                    "title": "第二条 YouTube 视频",
+                    "author_name": "",
+                    "view_count": 89000,
+                    "platform": "youtube",
+                },
+            ],
+        )
+        self.assertTrue(payload["has_more"])
+        requests_get.assert_called_once()
+        self.assertIn(
+            "https://www.youtube.com/@NewelOfKnowledge/videos?view=0&sort=p&flow=grid",
+            requests_get.call_args.args,
+        )
+        extract_playlist.assert_not_called()
+
+    def test_batch_preview_falls_back_to_recent_youtube_entries_when_popular_page_request_fails(self):
+        with patch("app.routers.batch.requests.get", side_effect=RuntimeError("boom")), \
+                patch("app.routers.batch._extract_flat_playlist", return_value={
+                    "entries": [
+                        {
+                            "id": "yt-1",
+                            "url": "https://www.youtube.com/watch?v=yt-1",
+                            "title": "第一条 YouTube 视频",
+                            "channel": "Channel A",
+                            "view_count": 1234,
+                        },
+                        {
+                            "id": "yt-2",
+                            "url": "https://www.youtube.com/watch?v=yt-2",
+                            "title": "第二条 YouTube 视频",
+                            "channel": "Channel A",
+                            "view_count": 1200,
+                        },
+                    ]
+                }) as extract_playlist:
+            payload = batch.preview_bilibili_space_page(
+                "https://www.youtube.com/@NewelOfKnowledge",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual([item["video_id"] for item in payload["items"]], ["yt-1", "yt-2"])
+        extract_playlist.assert_called_once_with(
+            "https://www.youtube.com/@NewelOfKnowledge/videos",
+            start=1,
+            end=3,
+        )
+
+    def test_batch_preview_falls_back_to_youtube_uploads_playlist_when_channel_tab_is_empty(self):
+        responses = [
+            {
+                "channel_id": "UC5fy9izAhlANCISUdU8quDg",
+                "entries": [],
+            },
+            {
+                "entries": [
+                    {
+                        "id": "yt-1",
+                        "url": "https://www.youtube.com/watch?v=yt-1",
+                        "title": "第一条 YouTube 视频",
+                    },
+                    {
+                        "id": "yt-2",
+                        "url": "https://www.youtube.com/watch?v=yt-2",
+                        "title": "第二条 YouTube 视频",
+                    },
+                    {
+                        "id": "yt-3",
+                        "url": "https://www.youtube.com/watch?v=yt-3",
+                        "title": "第三条 YouTube 视频",
+                    },
+                ]
+            },
+        ]
+
+        with patch("app.routers.batch.requests.get", side_effect=RuntimeError("popular page failed")), \
+                patch("app.routers.batch._extract_flat_playlist", side_effect=responses) as extract_playlist:
+            payload = batch.preview_bilibili_space_page(
+                "https://www.youtube.com/@NewelOfKnowledge",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual([item["video_id"] for item in payload["items"]], ["yt-1", "yt-2"])
+        self.assertTrue(payload["has_more"])
+        self.assertEqual(extract_playlist.call_count, 2)
+        first_call = extract_playlist.call_args_list[0]
+        second_call = extract_playlist.call_args_list[1]
+        self.assertEqual(first_call.args[0], "https://www.youtube.com/@NewelOfKnowledge/videos")
+        self.assertEqual(second_call.args[0], "https://www.youtube.com/playlist?list=UU5fy9izAhlANCISUdU8quDg")
+
+    def test_preview_page_preserves_explicit_bilibili_space_order_in_uploader_api(self):
+        uploader_service = Mock()
+        uploader_service.get_uploader_videos_page.return_value = {
+            "items": [],
+            "page": 1,
+            "page_size": 2,
+            "has_more": False,
+            "total": None,
+        }
+
+        with patch.object(batch, "_uploader_video_service", uploader_service, create=True), \
+                patch("app.routers.batch._extract_flat_playlist") as extract_playlist:
+            batch.preview_bilibili_space_page(
+                "https://space.bilibili.com/1/upload/video?order=pubdate",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        uploader_service.get_uploader_videos_page.assert_called_once_with(
+            mid="1",
+            page=1,
+            page_size=2,
+            limit=0,
+            order="pubdate",
+        )
+        extract_playlist.assert_not_called()
 
     def test_extract_flat_playlist_omits_playlistend_when_limit_is_zero(self):
         captured_options = {}
@@ -146,6 +811,17 @@ class TestBatchRouter(unittest.TestCase):
             batch._extract_flat_playlist("https://space.bilibili.com/1/upload/video", limit=0)
 
         self.assertNotIn("playlistend", captured_options)
+
+    def test_apply_bilibili_cookie_prefers_env_cookie_over_cookiefile(self):
+        with patch("app.routers.batch._cookie_file_path", return_value=Path("/tmp/existing-cookies.txt")), \
+                patch("pathlib.Path.exists", return_value=True), \
+                patch.dict("os.environ", {"BILIBILI_COOKIE": "SESSDATA=test-cookie"}, clear=False):
+            options = batch._apply_bilibili_cookie({
+                "http_headers": {"User-Agent": "test-agent"},
+            })
+
+        self.assertNotIn("cookiefile", options)
+        self.assertEqual(options["http_headers"]["Cookie"], "SESSDATA=test-cookie")
 
     def test_find_existing_task_by_video_id(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -204,7 +880,6 @@ class TestBatchRouter(unittest.TestCase):
         self.assertFalse(request.video_understanding)
         self.assertEqual(request.video_interval, 0)
         self.assertEqual(request.grid_size, [])
-        self.assertFalse(request.allow_audio_transcription)
 
     def test_new_batch_payload_contains_progress_metadata(self):
         @asynccontextmanager
@@ -269,7 +944,6 @@ class TestBatchRouter(unittest.TestCase):
             video_understanding=True,
             video_interval=8,
             grid_size=[3, 2],
-            allow_audio_transcription=True,
         )
         batch_id = "batch-1"
 
@@ -317,8 +991,52 @@ class TestBatchRouter(unittest.TestCase):
             video_interval=8,
             grid_size=[3, 2],
             mode="polished_transcript",
-            allow_audio_transcription=True,
         )
+
+    def test_batch_start_uses_video_platform_when_present(self):
+        request = batch.BatchStartRequest(
+            videos=[
+                batch.BatchVideo(
+                    video_id="yt-123",
+                    video_url="https://www.youtube.com/watch?v=yt-123",
+                    title="示例 YouTube 视频",
+                    platform="youtube",
+                )
+            ],
+            skip_existing=False,
+        )
+        batch_id = "batch-youtube"
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict("app.routers.batch._batches", {
+                    batch_id: {
+                        "batch_id": batch_id,
+                        "status": "PENDING",
+                        "total": 1,
+                        "completed": 0,
+                        "items": [{
+                            "video_id": "yt-123",
+                            "video_url": "https://www.youtube.com/watch?v=yt-123",
+                            "title": "示例 YouTube 视频",
+                            "platform": "youtube",
+                            "status": "PENDING",
+                            "task_id": None,
+                            "message": "",
+                        }],
+                    }
+                }, clear=True), \
+                patch("app.routers.batch.BATCH_OUTPUT_DIR", Path(tmp)), \
+                patch("app.routers.batch.NOTE_OUTPUT_DIR", Path(tmp)), \
+                patch("app.routers.batch.uuid.uuid4", return_value="task-youtube"), \
+                patch("app.routers.batch.run_note_task") as run_note_task:
+            run_note_task.side_effect = lambda **kwargs: (Path(tmp) / f"{kwargs['task_id']}.json").write_text(
+                json.dumps({"ok": True}),
+                encoding="utf-8",
+            )
+
+            batch.run_batch(batch_id, request)
+
+        self.assertEqual(run_note_task.call_args.kwargs["platform"], "youtube")
 
 
 if __name__ == "__main__":

@@ -9,10 +9,27 @@ from app.downloaders.base import Downloader, DownloadQuality
 from app.downloaders.youtube_subtitle import YouTubeSubtitleFetcher
 from app.models.notes_model import AudioDownloadResult
 from app.models.transcriber_model import TranscriptResult
+from app.services.cookie_manager import CookieConfigManager
 from app.utils.path_helper import get_data_dir
 from app.utils.url_parser import extract_video_id
 
 logger = logging.getLogger(__name__)
+cookie_manager = CookieConfigManager()
+
+
+def _apply_youtube_auth(ydl_opts: dict) -> dict:
+    raw_cookie = (cookie_manager.get('youtube') or '').strip()
+    if raw_cookie:
+        ydl_opts['http_headers'] = {
+            **ydl_opts.get('http_headers', {}),
+            'Cookie': raw_cookie,
+        }
+        logger.info('使用配置中的 YouTube Cookie')
+        return ydl_opts
+
+    ydl_opts['cookiesfrombrowser'] = ('safari',)
+    logger.info('未配置 YouTube Cookie，尝试使用 Safari 浏览器 Cookie')
+    return ydl_opts
 
 
 class YoutubeDownloader(Downloader, ABC):
@@ -45,6 +62,7 @@ class YoutubeDownloader(Downloader, ABC):
 
         if skip_download:
             ydl_opts['skip_download'] = True
+        ydl_opts = _apply_youtube_auth(ydl_opts)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=not skip_download)
@@ -90,6 +108,7 @@ class YoutubeDownloader(Downloader, ABC):
             'quiet': False,
             'merge_output_format': 'mp4',  # 确保合并成 mp4
         }
+        ydl_opts = _apply_youtube_auth(ydl_opts)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)

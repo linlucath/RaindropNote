@@ -195,6 +195,7 @@ class BilibiliDownloader(Downloader, ABC):
             'subtitleslangs': langs,
             'subtitlesformat': 'srt/json3/best',  # 支持多种格式
             'skip_download': True,
+            'noplaylist': True,
             'outtmpl': os.path.join(output_dir, f'{video_id}.%(ext)s'),
             'quiet': True,
         }

@@ -50,6 +50,7 @@ class TestBilibiliRouter(unittest.TestCase):
                     'video_id': 'BV1xx',
                     'video_url': 'https://www.bilibili.com/video/BV1xx',
                     'title': '视频1',
+                    'view_count': 123456,
                 }
             ],
             'page': 2,
@@ -67,6 +68,7 @@ class TestBilibiliRouter(unittest.TestCase):
         self.assertTrue(payload['data']['has_more'])
         self.assertIn('video_id', payload['data']['items'][0])
         self.assertIn('video_url', payload['data']['items'][0])
+        self.assertEqual(payload['data']['items'][0]['view_count'], 123456)
         preview.assert_called_once_with(
             'https://space.bilibili.com/558268687/upload/video',
             page=2,
