@@ -208,17 +208,11 @@ export default function BatchVideoPreview({
                   </Badge>
                 ) : null}
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
-                <Badge variant="outline" className="bg-white text-neutral-700">
-                  共 {uniqueVideos.length} 条
-                </Badge>
-                {uniqueVideos.length !== videos.length ? (
-                  <Badge variant="outline" className="bg-white text-neutral-500">
-                    已去重 {uniqueVideos.length} 条
-                  </Badge>
-                ) : null}
-                {completedCount > 0 ? <span>已有 {completedCount} 条结果可查看</span> : null}
-              </div>
+              {completedCount > 0 ? (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                  <span>已有 {completedCount} 条结果可查看</span>
+                </div>
+              ) : null}
             </div>
           </div>
 
