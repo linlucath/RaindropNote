@@ -266,6 +266,9 @@ const NoteForm = () => {
   const uploaderBatchMode = sourceType === 'uploader_batch'
   const dynamicsMode = sourceType === 'dynamics'
   const batchMode = uploaderBatchMode || dynamicsMode
+  const showSourceSection = !dynamicsMode
+  const sourceSectionTitle = batchMode ? '1. 视频来源' : '视频来源'
+  const videoSectionTitle = dynamicsMode ? '1. 选择视频' : '2. 选择视频'
   const editing = currentTask && currentTask.id
   const batchRequestSignature = useMemo(
     () =>
@@ -893,257 +896,248 @@ const NoteForm = () => {
             </div>
           </WorkspaceSection>
 
-          <WorkspaceSection title={batchMode ? '1. 视频来源' : '视频来源'}>
-            <div className="space-y-3">
-              {uploaderBatchMode ? (
-                <FormField
-                  control={form.control}
-                  name="uploader_source_mode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <Select
-                        value={field.value}
-                        onValueChange={value => {
-                          field.onChange(value)
-                          resetPreviewUiState({
-                            clearSelectedUploader: value !== 'followings',
-                          })
-                        }}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {[
-                            { value: 'manual', label: '手动输入主页' },
-                            { value: 'followings', label: '从关注列表选择' },
-                          ].map(option => (
-                            <SelectItem
-                              key={option.value}
-                              value={option.value}
-                              disabled={option.value === 'followings' && platform !== 'bilibili'}
-                            >
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
-                  )}
-                />
-              ) : null}
-
-              <div
-                className={
-                  uploaderBatchMode && uploaderSourceMode === 'manual'
-                    ? 'grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2'
-                    : 'flex gap-2'
-                }
-              >
-                {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
+          {showSourceSection && (
+            <WorkspaceSection title={sourceSectionTitle}>
+              <div className="space-y-3">
+                {uploaderBatchMode ? (
                   <FormField
                     control={form.control}
-                    name="platform"
+                    name="uploader_source_mode"
                     render={({ field }) => (
                       <FormItem>
                         <Select
                           value={field.value}
                           onValueChange={value => {
-                            if (editing) {
-                              setCurrentTask(null)
-                            }
                             field.onChange(value)
-                            if (uploaderBatchMode) {
-                              if (value === 'youtube') {
-                                form.setValue('uploader_source_mode', 'manual')
-                              }
-                              resetPreviewUiState({
-                                clearSelectedUploader: value !== 'bilibili',
-                              })
-                            }
+                            resetPreviewUiState({
+                              clearSelectedUploader: value !== 'followings',
+                            })
                           }}
                         >
                           <FormControl>
-                            <SelectTrigger className="w-32">
+                            <SelectTrigger className="w-full">
                               <SelectValue />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {(uploaderBatchMode
-                              ? videoPlatforms.filter(
-                                  p => p.value === 'bilibili' || p.value === 'youtube'
-                                )
-                              : videoPlatforms
-                            )?.map(p => (
-                              <SelectItem key={p.value} value={p.value}>
-                                <div className="flex items-center justify-center gap-2">
-                                  <div className="h-4 w-4">{p.logo()}</div>
-                                  <span>{p.label}</span>
-                                </div>
+                            {[
+                              { value: 'manual', label: '手动输入主页' },
+                              { value: 'followings', label: '从关注列表选择' },
+                            ].map(option => (
+                              <SelectItem
+                                key={option.value}
+                                value={option.value}
+                                disabled={option.value === 'followings' && platform !== 'bilibili'}
+                              >
+                                {option.label}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        <FormMessage style={{ display: 'none' }} />
                       </FormItem>
                     )}
                   />
-                )}
-                {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
-                  <FormField
-                    control={form.control}
-                    name="video_url"
-                    render={({ field }) => (
-                      <FormItem className="min-w-0 flex-1">
-                        <Input
-                          placeholder={
-                            uploaderBatchMode
-                              ? platform === 'youtube'
-                                ? 'https://www.youtube.com/@channel_handle'
-                                : 'https://space.bilibili.com/123456'
-                              : platform === 'local'
-                                ? '请输入本地视频路径'
-                                : '请输入视频网站链接'
-                          }
-                          {...field}
-                          onChange={event => {
-                            if (editing) {
-                              setCurrentTask(null)
-                            }
-                            field.onChange(event)
-                          }}
-                        />
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                )}
-                {uploaderBatchMode && uploaderSourceMode === 'manual' && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-10 px-3"
-                    disabled={batchLoading}
-                    onClick={handlePreviewBatch}
-                  >
-                    {batchLoading ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                    )}
-                    拉取
-                  </Button>
-                )}
-              </div>
+                ) : null}
 
-              {batchMode && (
-                <div className="rounded-md bg-neutral-50 px-3 py-2">
-                  <div className="flex items-center justify-between gap-3">
+                <div
+                  className={
+                    uploaderBatchMode && uploaderSourceMode === 'manual'
+                      ? 'grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2'
+                      : 'flex gap-2'
+                  }
+                >
+                  {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
                     <FormField
                       control={form.control}
-                      name="skip_existing"
+                      name="platform"
                       render={({ field }) => (
-                        <FormItem className="flex w-full items-center justify-between gap-3">
-                          <FormLabel className="text-xs text-neutral-500">跳过已处理</FormLabel>
-                          <div className="flex h-8 items-center">
-                            <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                          </div>
+                        <FormItem>
+                          <Select
+                            value={field.value}
+                            onValueChange={value => {
+                              if (editing) {
+                                setCurrentTask(null)
+                              }
+                              field.onChange(value)
+                              if (uploaderBatchMode) {
+                                if (value === 'youtube') {
+                                  form.setValue('uploader_source_mode', 'manual')
+                                }
+                                resetPreviewUiState({
+                                  clearSelectedUploader: value !== 'bilibili',
+                                })
+                              }
+                            }}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-32">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {(uploaderBatchMode
+                                ? videoPlatforms.filter(
+                                    p => p.value === 'bilibili' || p.value === 'youtube'
+                                  )
+                                : videoPlatforms
+                              )?.map(p => (
+                                <SelectItem key={p.value} value={p.value}>
+                                  <div className="flex items-center justify-center gap-2">
+                                    <div className="h-4 w-4">{p.logo()}</div>
+                                    <span>{p.label}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage style={{ display: 'none' }} />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                  {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
+                    <FormField
+                      control={form.control}
+                      name="video_url"
+                      render={({ field }) => (
+                        <FormItem className="min-w-0 flex-1">
+                          <Input
+                            placeholder={
+                              uploaderBatchMode
+                                ? platform === 'youtube'
+                                  ? 'https://www.youtube.com/@channel_handle'
+                                  : 'https://space.bilibili.com/123456'
+                                : platform === 'local'
+                                  ? '请输入本地视频路径'
+                                  : '请输入视频网站链接'
+                            }
+                            {...field}
+                            onChange={event => {
+                              if (editing) {
+                                setCurrentTask(null)
+                              }
+                              field.onChange(event)
+                            }}
+                          />
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                  </div>
+                  )}
+                  {uploaderBatchMode && uploaderSourceMode === 'manual' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 px-3"
+                      disabled={batchLoading}
+                      onClick={handlePreviewBatch}
+                    >
+                      {batchLoading ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      拉取
+                    </Button>
+                  )}
                 </div>
-              )}
 
-              {uploaderBatchMode && uploaderSourceMode === 'followings' ? (
-                <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
-                  <FollowingUploaderPicker
-                    initialPageData={prefetchedFollowings}
-                    preloading={prefetchingFollowings}
-                    selectedMid={selectedUploader?.mid}
-                    onSelectUploader={uploader => {
-                      setSelectedUploader(uploader)
-                      resetPreviewUiState({
-                        clearSelectedUploader: false,
-                      })
-                    }}
-                  />
-                  {selectedUploader ? (
-                    <div className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-neutral-600">
-                      <span>已选择 UP 主</span>
-                      <span className="font-medium text-neutral-900">{selectedUploader.name}</span>
-                      <span className="text-neutral-400">UID {selectedUploader.mid}</span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {dynamicsMode && batchLoading ? (
-                <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-3 text-sm text-neutral-600">
-                    <span className="inline-flex items-center gap-2 text-xs text-sky-700">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      正在加载
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-
-              <FormField
-                control={form.control}
-                name="video_url"
-                render={({ field }) => (
-                  <FormItem className="flex-1">
-                    {!batchMode && platform === 'local' && (
-                      <div
-                        className="hover:border-primary flex h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50 text-center transition-colors"
-                        onDragOver={e => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                        }}
-                        onDrop={e => {
-                          e.preventDefault()
-                          const file = e.dataTransfer.files?.[0]
-                          if (file) handleFileUpload(file, field.onChange)
-                        }}
-                        onClick={() => {
-                          const input = document.createElement('input')
-                          input.type = 'file'
-                          input.accept = 'video/*'
-                          input.onchange = e => {
-                            const file = (e.target as HTMLInputElement).files?.[0]
-                            if (file) handleFileUpload(file, field.onChange)
-                          }
-                          input.click()
-                        }}
-                      >
-                        <UploadCloud className="mb-2 h-5 w-5 text-neutral-400" />
-                        {isUploading ? (
-                          <p className="text-sm text-blue-500">上传中，请稍候…</p>
-                        ) : uploadSuccess ? (
-                          <p className="text-sm text-green-600">上传成功</p>
-                        ) : (
-                          <p className="text-sm text-neutral-500">
-                            拖拽文件到这里上传
-                            <span className="mt-1 block text-xs text-neutral-400">
-                              或点击选择文件
-                            </span>
-                          </p>
+                {batchMode && (
+                  <div className="rounded-md bg-neutral-50 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <FormField
+                        control={form.control}
+                        name="skip_existing"
+                        render={({ field }) => (
+                          <FormItem className="flex w-full items-center justify-between gap-3">
+                            <FormLabel className="text-xs text-neutral-500">跳过已处理</FormLabel>
+                            <div className="flex h-8 items-center">
+                              <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                            </div>
+                            <FormMessage />
+                          </FormItem>
                         )}
-                      </div>
-                    )}
-                    <FormMessage />
-                  </FormItem>
+                      />
+                    </div>
+                  </div>
                 )}
-              />
-            </div>
-          </WorkspaceSection>
+
+                {uploaderBatchMode && uploaderSourceMode === 'followings' ? (
+                  <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
+                    <FollowingUploaderPicker
+                      initialPageData={prefetchedFollowings}
+                      preloading={prefetchingFollowings}
+                      selectedMid={selectedUploader?.mid}
+                      onSelectUploader={uploader => {
+                        setSelectedUploader(uploader)
+                        resetPreviewUiState({
+                          clearSelectedUploader: false,
+                        })
+                      }}
+                    />
+                    {selectedUploader ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-neutral-600">
+                        <span>已选择 UP 主</span>
+                        <span className="font-medium text-neutral-900">{selectedUploader.name}</span>
+                        <span className="text-neutral-400">UID {selectedUploader.mid}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                <FormField
+                  control={form.control}
+                  name="video_url"
+                  render={({ field }) => (
+                    <FormItem className="flex-1">
+                      {!batchMode && platform === 'local' && (
+                        <div
+                          className="hover:border-primary flex h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50 text-center transition-colors"
+                          onDragOver={e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                          }}
+                          onDrop={e => {
+                            e.preventDefault()
+                            const file = e.dataTransfer.files?.[0]
+                            if (file) handleFileUpload(file, field.onChange)
+                          }}
+                          onClick={() => {
+                            const input = document.createElement('input')
+                            input.type = 'file'
+                            input.accept = 'video/*'
+                            input.onchange = e => {
+                              const file = (e.target as HTMLInputElement).files?.[0]
+                              if (file) handleFileUpload(file, field.onChange)
+                            }
+                            input.click()
+                          }}
+                        >
+                          <UploadCloud className="mb-2 h-5 w-5 text-neutral-400" />
+                          {isUploading ? (
+                            <p className="text-sm text-blue-500">上传中，请稍候…</p>
+                          ) : uploadSuccess ? (
+                            <p className="text-sm text-green-600">上传成功</p>
+                          ) : (
+                            <p className="text-sm text-neutral-500">
+                              拖拽文件到这里上传
+                              <span className="mt-1 block text-xs text-neutral-400">
+                                或点击选择文件
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+            </WorkspaceSection>
+          )}
 
           {batchMode && (
-            <WorkspaceSection title="2. 选择视频">
+            <WorkspaceSection title={videoSectionTitle}>
               <div className="space-y-3">
                 <BatchVideoPreview
                   videos={previewVideos}
