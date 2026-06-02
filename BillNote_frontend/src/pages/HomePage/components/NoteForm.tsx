@@ -4,15 +4,22 @@ import {
   FormControl,
   FormField,
   FormItem,
-  FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
-import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import { FieldErrors, useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus, RefreshCw, UploadCloud } from 'lucide-react'
+import { Info, Loader2, Plus } from 'lucide-react'
 import {
   BatchVideo,
   BilibiliDynamicPage,
@@ -25,9 +32,9 @@ import {
   getBilibiliDynamics,
   getBilibiliFollowings,
   getBilibiliUploaderVideos,
+  get_task_list,
   previewBatchVideos,
 } from '@/services/note.ts'
-import { uploadFile } from '@/services/upload.ts'
 import { getDownloaderCookie } from '@/services/downloader.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
@@ -50,8 +57,15 @@ import {
   getNextBatchPreviewState,
   getUniqueBatchVideos,
 } from '@/pages/HomePage/components/batchVideoSelection.ts'
-import { shouldAutoLoadSelectedUploaderVideos } from '@/pages/HomePage/components/progressiveBatchLoading.ts'
-import { shouldReuseTaskForSubmission } from '@/pages/HomePage/components/taskSubmission.ts'
+import {
+  shouldAutoLoadManualUploaderVideos,
+  shouldAutoLoadSelectedUploaderVideos,
+} from '@/pages/HomePage/components/progressiveBatchLoading.ts'
+import {
+  inferPlatformFromVideoUrl,
+  resolveSubmissionPlatform,
+  shouldReuseTaskForSubmission,
+} from '@/pages/HomePage/components/taskSubmission.ts'
 import {
   buildPreviewStatusItems,
   resolvePreviewVideoAction,
@@ -65,7 +79,6 @@ import {
   SelectValue,
 } from '@/components/ui/select.tsx'
 import { Input } from '@/components/ui/input.tsx'
-import { Switch } from '@/components/ui/switch.tsx'
 import { videoPlatforms } from '@/constant/note.ts'
 import toast from 'react-hot-toast'
 
@@ -83,6 +96,22 @@ const isYoutubeUploaderUrl = (value?: string) => {
   }
 }
 
+const isBilibiliUploaderUrl = (value?: string) => {
+  if (!value) {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+    return url.hostname.toLowerCase() === 'space.bilibili.com' && /^\/\d+/.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
+const normalizeSupportedPlatform = (value?: string): string =>
+  value && videoPlatforms.some(platform => platform.value === value) ? value : 'bilibili'
+
 /* -------------------- 校验 Schema -------------------- */
 const formSchema = z
   .object({
@@ -90,35 +119,44 @@ const formSchema = z
     source_type: z.enum(['single', 'uploader_batch', 'dynamics']).default('single'),
     uploader_source_mode: z.enum(['manual', 'followings']).default('manual'),
     batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
-    skip_existing: z.boolean().default(true).optional(),
     platform: z.string().nonempty('请选择平台'),
   })
   .superRefine(
-    ({ video_url, platform, source_type, uploader_source_mode }, ctx) => {
+    ({ video_url, source_type, uploader_source_mode }, ctx) => {
       if (source_type === 'uploader_batch') {
         if (uploader_source_mode === 'manual') {
           if (!video_url) {
             ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
-          } else if (platform === 'youtube' && !isYoutubeUploaderUrl(video_url)) {
+            return
+          }
+
+          const inferredPlatform = inferPlatformFromVideoUrl(video_url)
+          if (inferredPlatform === 'youtube') {
+            if (!isYoutubeUploaderUrl(video_url)) {
+              ctx.addIssue({
+                code: 'custom',
+                message: '请输入 YouTube 频道主页链接',
+                path: ['video_url'],
+              })
+            }
+          } else if (inferredPlatform === 'bilibili') {
+            if (!isBilibiliUploaderUrl(video_url)) {
+              ctx.addIssue({
+                code: 'custom',
+                message: '请输入 B 站 UP 主主页链接',
+                path: ['video_url'],
+              })
+            }
+          } else {
             ctx.addIssue({
               code: 'custom',
-              message: '请输入 YouTube 频道主页链接',
-              path: ['video_url'],
-            })
-          } else if (platform !== 'youtube' && !video_url.includes('space.bilibili.com')) {
-            ctx.addIssue({
-              code: 'custom',
-              message: '请输入 B 站 UP 主主页链接',
+              message: '请输入 B 站 UP 主主页或 YouTube 频道主页链接',
               path: ['video_url'],
             })
           }
         }
       } else if (source_type === 'dynamics') {
         // Followed dynamics are account-backed and do not need a direct video URL input.
-      } else if (platform === 'local') {
-        if (!video_url) {
-          ctx.addIssue({ code: 'custom', message: '本地视频路径不能为空', path: ['video_url'] })
-        }
       } else {
         if (!video_url) {
           ctx.addIssue({ code: 'custom', message: '视频链接不能为空', path: ['video_url'] })
@@ -138,6 +176,7 @@ export type NoteFormValues = z.infer<typeof formSchema>
 
 const PREVIEW_PAGE_SIZE = 20
 const BATCH_LIMIT_ALL = 0
+const MANUAL_UPLOADER_AUTOLOAD_DELAY_MS = 600
 
 const getDynamicRequestPageSize = ({
   batchLimit,
@@ -189,8 +228,6 @@ const WorkspaceSection = ({
 
 /* -------------------- 主组件 -------------------- */
 const NoteForm = () => {
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadSuccess, setUploadSuccess] = useState(false)
   /* ---- 全局状态 ---- */
   const {
     addPendingTask,
@@ -199,6 +236,7 @@ const NoteForm = () => {
     setSelectedTask,
     getCurrentTask,
     retryTask,
+    syncSavedTasks,
   } = useTaskStore()
   const tasks = useTaskStore(state => state.tasks)
   const { loadEnabledModels, modelList } = useModelStore()
@@ -223,7 +261,10 @@ const NoteForm = () => {
   /* ---- 表单 ---- */
   const form = useForm<NoteFormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: persistedFormState,
+    defaultValues: {
+      ...persistedFormState,
+      platform: normalizeSupportedPlatform(persistedFormState.platform),
+    },
   })
   const currentTask = getCurrentTask()
   const hydratedTaskIdRef = useRef<string | null>(null)
@@ -246,6 +287,7 @@ const NoteForm = () => {
   const [prefetchingFollowings, setPrefetchingFollowings] = useState(false)
   const followingsPrefetchStartedRef = useRef(false)
   const lastAutoLoadedUploaderMidRef = useRef<string | null>(null)
+  const lastAutoLoadedManualSignatureRef = useRef<string | null>(null)
   const dynamicsAutoLoadStartedRef = useRef(false)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
@@ -260,9 +302,6 @@ const NoteForm = () => {
   const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as
     | string
     | undefined
-  const watchedSkipExisting = useWatch({ control: form.control, name: 'skip_existing' }) as
-    | boolean
-    | undefined
   const uploaderBatchMode = sourceType === 'uploader_batch'
   const dynamicsMode = sourceType === 'dynamics'
   const batchMode = uploaderBatchMode || dynamicsMode
@@ -270,6 +309,16 @@ const NoteForm = () => {
   const sourceSectionTitle = batchMode ? '1. 视频来源' : '视频来源'
   const videoSectionTitle = dynamicsMode ? '1. 选择视频' : '2. 选择视频'
   const editing = currentTask && currentTask.id
+  const resolvedSourcePlatform = useMemo(
+    () =>
+      resolveSubmissionPlatform({
+        source_type: sourceType,
+        uploader_source_mode: uploaderSourceMode,
+        video_url: watchedVideoUrl,
+        platform,
+      }),
+    [platform, sourceType, uploaderSourceMode, watchedVideoUrl]
+  )
   const batchRequestSignature = useMemo(
     () =>
       JSON.stringify(
@@ -283,12 +332,18 @@ const NoteForm = () => {
               }
             : {
                 source: 'manual',
-                platform,
+                platform: resolvedSourcePlatform,
                 space_url: (watchedVideoUrl || '').trim(),
                 limit: BATCH_LIMIT_ALL,
               }
       ),
-    [dynamicsMode, platform, selectedUploader?.mid, uploaderSourceMode, watchedVideoUrl]
+    [
+      dynamicsMode,
+      resolvedSourcePlatform,
+      selectedUploader?.mid,
+      uploaderSourceMode,
+      watchedVideoUrl,
+    ]
   )
   const previewDirty =
     batchMode &&
@@ -322,7 +377,7 @@ const NoteForm = () => {
       source_type: sourceType,
       uploader_source_mode: uploaderSourceMode,
       video_url: watchedVideoUrl,
-      platform,
+      platform: resolvedSourcePlatform,
     },
     ignoreTaskStatus: true,
   })
@@ -362,6 +417,25 @@ const NoteForm = () => {
     return
   }, [loadEnabledModels])
   useEffect(() => {
+    if (
+      sourceType !== 'single' &&
+      !(sourceType === 'uploader_batch' && uploaderSourceMode === 'manual')
+    ) {
+      return
+    }
+
+    const inferredPlatform = inferPlatformFromVideoUrl(watchedVideoUrl)
+    if (!inferredPlatform || inferredPlatform === platform) {
+      return
+    }
+
+    form.setValue('platform', inferredPlatform, {
+      shouldDirty: false,
+      shouldTouch: false,
+      shouldValidate: false,
+    })
+  }, [form, platform, sourceType, uploaderSourceMode, watchedVideoUrl])
+  useEffect(() => {
     if (!preferredDefaultModelName) {
       return
     }
@@ -378,19 +452,17 @@ const NoteForm = () => {
   }, [generationModelName, modelList, preferredDefaultModelName, setGenerationSettings])
   useEffect(() => {
     setPersistedFormState({
-      platform: platform || 'bilibili',
+      platform: resolvedSourcePlatform || 'bilibili',
       source_type: sourceType || 'single',
       uploader_source_mode: uploaderSourceMode || 'manual',
       video_url: watchedVideoUrl || '',
       batch_limit: BATCH_LIMIT_ALL,
-      skip_existing: watchedSkipExisting ?? true,
     })
   }, [
-    platform,
+    resolvedSourcePlatform,
     setPersistedFormState,
     sourceType,
     uploaderSourceMode,
-    watchedSkipExisting,
     watchedVideoUrl,
   ])
   useEffect(() => {
@@ -470,20 +542,18 @@ const NoteForm = () => {
     }
 
     form.reset({
-      platform: formData.platform || 'bilibili',
+      platform: normalizeSupportedPlatform(formData.platform),
       source_type: formData.source_type || 'single',
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
       batch_limit: BATCH_LIMIT_ALL,
-      skip_existing: formData.skip_existing ?? true,
     })
     replacePersistedFormState({
-      platform: formData.platform || 'bilibili',
+      platform: normalizeSupportedPlatform(formData.platform),
       source_type: formData.source_type || 'single',
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
       batch_limit: BATCH_LIMIT_ALL,
-      skip_existing: formData.skip_existing ?? true,
     })
     resetPreviewUiState()
     clearPersistedPreviewState()
@@ -500,16 +570,13 @@ const NoteForm = () => {
     const values = form.getValues()
     const sourceMode = values.uploader_source_mode
     const dynamicsSource = values.source_type === 'dynamics'
+    const resolvedPreviewPlatform = resolveSubmissionPlatform(values)
     const valid =
       values.source_type === 'uploader_batch' && sourceMode === 'manual'
         ? await form.trigger(['video_url'])
         : true
     if (!valid) {
-      toast.error(
-        values.platform === 'youtube'
-          ? '请先填写有效的 YouTube 频道主页链接'
-          : '请先填写有效的 UP 主主页链接'
-      )
+      toast.error('请先填写有效的 B 站 UP 主主页或 YouTube 频道主页链接')
       return
     }
     if (!dynamicsSource && sourceMode === 'followings' && !selectedUploader) {
@@ -588,7 +655,7 @@ const NoteForm = () => {
                   }
                 : {
                     source: 'manual',
-                    platform: values.platform,
+                    platform: resolvedPreviewPlatform,
                     space_url: (values.video_url || '').trim(),
                     limit: BATCH_LIMIT_ALL,
                   }
@@ -643,6 +710,46 @@ const NoteForm = () => {
   ])
 
   useEffect(() => {
+    if (uploaderSourceMode !== 'manual') {
+      lastAutoLoadedManualSignatureRef.current = null
+      return
+    }
+
+    if (
+      !shouldAutoLoadManualUploaderVideos({
+        uploaderBatchMode,
+        uploaderSourceMode,
+        videoUrl: watchedVideoUrl,
+        batchLoading,
+        previewLoadingMore,
+        batchRequestSignature,
+        previewSignature,
+        lastAutoLoadedSignature: lastAutoLoadedManualSignatureRef.current,
+      })
+    ) {
+      return
+    }
+
+    const autoLoadTimer = window.setTimeout(() => {
+      lastAutoLoadedManualSignatureRef.current = batchRequestSignature
+      void loadPreviewBatchPage(true)
+    }, MANUAL_UPLOADER_AUTOLOAD_DELAY_MS)
+
+    return () => {
+      window.clearTimeout(autoLoadTimer)
+    }
+  }, [
+    batchLoading,
+    batchRequestSignature,
+    loadPreviewBatchPage,
+    previewLoadingMore,
+    previewSignature,
+    uploaderBatchMode,
+    uploaderSourceMode,
+    watchedVideoUrl,
+  ])
+
+  useEffect(() => {
     if (!dynamicsMode) {
       dynamicsAutoLoadStartedRef.current = false
       return
@@ -674,23 +781,6 @@ const NoteForm = () => {
     return status !== undefined && !TERMINAL_TASK_STATUSES.includes(status)
   }
   const generating = isGenerating()
-  const handleFileUpload = async (file: File, cb: (url: string) => void) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    setIsUploading(true)
-    setUploadSuccess(false)
-
-    try {
-      const data = await uploadFile(formData)
-      cb(data.url)
-      setUploadSuccess(true)
-    } catch (err) {
-      console.error('上传失败:', err)
-      // message.error('上传失败，请重试')
-    } finally {
-      setIsUploading(false)
-    }
-  }
 
   const getPreviewRefreshErrorMessage = (values: NoteFormValues) =>
     values.source_type === 'dynamics'
@@ -704,6 +794,16 @@ const NoteForm = () => {
     setSelectedTask(taskId)
   }
 
+  const openExistingTask = async (taskId: string) => {
+    try {
+      const res = await get_task_list()
+      syncSavedTasks(res?.tasks || [])
+    } catch (error) {
+      console.warn('同步已处理文字稿失败，将尝试打开本地任务缓存', error)
+    }
+    focusTask(taskId)
+  }
+
   const submitPreviewVideo = async (video: BatchVideo, retryTaskId?: string) => {
     const generationSettings = getGenerationPayloadSettings()
     if (!generationSettings) {
@@ -712,12 +812,17 @@ const NoteForm = () => {
     }
 
     const values = form.getValues()
+    const fallbackPlatform = resolveSubmissionPlatform({
+      ...values,
+      source_type: 'single',
+      video_url: video.video_url,
+    })
     const payload = {
       ...values,
       ...generationSettings,
       batch_limit: BATCH_LIMIT_ALL,
       video_url: video.video_url,
-      platform: video.platform || values.platform,
+      platform: video.platform || fallbackPlatform,
       mode: 'polished_transcript' as GenerationMode,
     }
 
@@ -759,7 +864,7 @@ const NoteForm = () => {
     const action = resolvePreviewVideoAction(statusItem)
 
     if (action === 'open' && statusItem?.task_id) {
-      focusTask(statusItem.task_id)
+      await openExistingTask(statusItem.task_id)
       return
     }
 
@@ -774,10 +879,15 @@ const NoteForm = () => {
     }
 
     const resolvedMode: GenerationMode = 'polished_transcript'
+    const resolvedPlatform = resolveSubmissionPlatform(values)
+    const resolvedValues = {
+      ...values,
+      platform: resolvedPlatform,
+    }
     const reuseCurrentTask = shouldReuseTaskForSubmission({
       currentTaskId,
       currentTask,
-      nextValues: values,
+      nextValues: resolvedValues,
     })
 
     if (batchMode) {
@@ -785,7 +895,7 @@ const NoteForm = () => {
     }
 
     const payload = {
-      ...values,
+      ...resolvedValues,
       ...generationSettings,
       batch_limit: BATCH_LIMIT_ALL,
       mode: resolvedMode,
@@ -797,7 +907,7 @@ const NoteForm = () => {
     }
 
     const data = await generateNote(payload)
-    addPendingTask(data.task_id, values.platform, payload)
+    addPendingTask(data.task_id, resolvedPlatform, payload)
   }
   const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
     console.warn('表单校验失败：', errors)
@@ -843,6 +953,23 @@ const NoteForm = () => {
 
   const handlePreviewBatch = async () => {
     await loadPreviewBatchPage(true)
+  }
+
+  const handleManualUploaderInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+      return
+    }
+
+    if (!uploaderBatchMode || uploaderSourceMode !== 'manual') {
+      return
+    }
+
+    event.preventDefault()
+    if (batchLoading) {
+      return
+    }
+
+    void handlePreviewBatch()
   }
 
   /* -------------------- 渲染 -------------------- */
@@ -927,7 +1054,6 @@ const NoteForm = () => {
                               <SelectItem
                                 key={option.value}
                                 value={option.value}
-                                disabled={option.value === 'followings' && platform !== 'bilibili'}
                               >
                                 {option.label}
                               </SelectItem>
@@ -942,59 +1068,10 @@ const NoteForm = () => {
                 <div
                   className={
                     uploaderBatchMode && uploaderSourceMode === 'manual'
-                      ? 'grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2'
+                      ? 'flex gap-2'
                       : 'flex gap-2'
                   }
                 >
-                  {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
-                    <FormField
-                      control={form.control}
-                      name="platform"
-                      render={({ field }) => (
-                        <FormItem>
-                          <Select
-                            value={field.value}
-                            onValueChange={value => {
-                              if (editing) {
-                                setCurrentTask(null)
-                              }
-                              field.onChange(value)
-                              if (uploaderBatchMode) {
-                                if (value === 'youtube') {
-                                  form.setValue('uploader_source_mode', 'manual')
-                                }
-                                resetPreviewUiState({
-                                  clearSelectedUploader: value !== 'bilibili',
-                                })
-                              }
-                            }}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="w-32">
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {(uploaderBatchMode
-                                ? videoPlatforms.filter(
-                                    p => p.value === 'bilibili' || p.value === 'youtube'
-                                  )
-                                : videoPlatforms
-                              )?.map(p => (
-                                <SelectItem key={p.value} value={p.value}>
-                                  <div className="flex items-center justify-center gap-2">
-                                    <div className="h-4 w-4">{p.logo()}</div>
-                                    <span>{p.label}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage style={{ display: 'none' }} />
-                        </FormItem>
-                      )}
-                    />
-                  )}
                   {(!batchMode || (uploaderBatchMode && uploaderSourceMode === 'manual')) && (
                     <FormField
                       control={form.control}
@@ -1004,12 +1081,8 @@ const NoteForm = () => {
                           <Input
                             placeholder={
                               uploaderBatchMode
-                                ? platform === 'youtube'
-                                  ? 'https://www.youtube.com/@channel_handle'
-                                  : 'https://space.bilibili.com/123456'
-                                : platform === 'local'
-                                  ? '请输入本地视频路径'
-                                  : '请输入视频网站链接'
+                                ? 'https://space.bilibili.com/123456 或 https://www.youtube.com/@channel_handle'
+                                : '粘贴 B站 / YouTube / 抖音 / 快手链接'
                             }
                             {...field}
                             onChange={event => {
@@ -1018,49 +1091,14 @@ const NoteForm = () => {
                               }
                               field.onChange(event)
                             }}
+                            onKeyDown={handleManualUploaderInputKeyDown}
                           />
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                   )}
-                  {uploaderBatchMode && uploaderSourceMode === 'manual' && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 px-3"
-                      disabled={batchLoading}
-                      onClick={handlePreviewBatch}
-                    >
-                      {batchLoading ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                      )}
-                      拉取
-                    </Button>
-                  )}
                 </div>
-
-                {batchMode && (
-                  <div className="rounded-md bg-neutral-50 px-3 py-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <FormField
-                        control={form.control}
-                        name="skip_existing"
-                        render={({ field }) => (
-                          <FormItem className="flex w-full items-center justify-between gap-3">
-                            <FormLabel className="text-xs text-neutral-500">跳过已处理</FormLabel>
-                            <div className="flex h-8 items-center">
-                              <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                            </div>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                  </div>
-                )}
 
                 {uploaderBatchMode && uploaderSourceMode === 'followings' ? (
                   <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
@@ -1078,60 +1116,15 @@ const NoteForm = () => {
                     {selectedUploader ? (
                       <div className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-neutral-600">
                         <span>已选择 UP 主</span>
-                        <span className="font-medium text-neutral-900">{selectedUploader.name}</span>
+                        <span className="font-medium text-neutral-900">
+                          {selectedUploader.name}
+                        </span>
                         <span className="text-neutral-400">UID {selectedUploader.mid}</span>
                       </div>
                     ) : null}
                   </div>
                 ) : null}
 
-                <FormField
-                  control={form.control}
-                  name="video_url"
-                  render={({ field }) => (
-                    <FormItem className="flex-1">
-                      {!batchMode && platform === 'local' && (
-                        <div
-                          className="hover:border-primary flex h-32 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-neutral-300 bg-neutral-50 text-center transition-colors"
-                          onDragOver={e => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                          }}
-                          onDrop={e => {
-                            e.preventDefault()
-                            const file = e.dataTransfer.files?.[0]
-                            if (file) handleFileUpload(file, field.onChange)
-                          }}
-                          onClick={() => {
-                            const input = document.createElement('input')
-                            input.type = 'file'
-                            input.accept = 'video/*'
-                            input.onchange = e => {
-                              const file = (e.target as HTMLInputElement).files?.[0]
-                              if (file) handleFileUpload(file, field.onChange)
-                            }
-                            input.click()
-                          }}
-                        >
-                          <UploadCloud className="mb-2 h-5 w-5 text-neutral-400" />
-                          {isUploading ? (
-                            <p className="text-sm text-blue-500">上传中，请稍候…</p>
-                          ) : uploadSuccess ? (
-                            <p className="text-sm text-green-600">上传成功</p>
-                          ) : (
-                            <p className="text-sm text-neutral-500">
-                              拖拽文件到这里上传
-                              <span className="mt-1 block text-xs text-neutral-400">
-                                或点击选择文件
-                              </span>
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
               </div>
             </WorkspaceSection>
           )}
