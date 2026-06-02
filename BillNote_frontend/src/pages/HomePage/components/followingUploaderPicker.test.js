@@ -18,9 +18,10 @@ test('FollowingUploaderPicker no longer exposes uploader search controls', () =>
   assert.doesNotMatch(source, />\s*搜索\s*</)
 })
 
-test('FollowingUploaderPicker no longer renders remote uploader avatars', () => {
-  assert.doesNotMatch(source, /item\.face/)
-  assert.doesNotMatch(source, /<img/)
+test('FollowingUploaderPicker renders uploader avatars with icon fallback', () => {
+  assert.match(source, /item\.avatar_url/)
+  assert.match(source, /<img/)
+  assert.match(source, /setFailedAvatarMids/)
 })
 
 test('FollowingUploaderPicker auto-loads without manual fetch or load-more buttons', () => {

@@ -189,6 +189,7 @@ export interface BatchVideo {
 export interface FollowingUploader {
   mid: string
   name: string
+  avatar_url?: string
   sign: string
 }
 

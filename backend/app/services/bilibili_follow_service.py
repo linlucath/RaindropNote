@@ -41,10 +41,23 @@ class BilibiliFollowService:
             'Cookie': cookie,
         }
 
+    def _normalize_avatar_url(self, url: Any) -> str:
+        avatar_url = str(url or '').strip()
+        if not avatar_url:
+            return ''
+        if avatar_url.startswith('//'):
+            avatar_url = f'https:{avatar_url}'
+        elif avatar_url.startswith('http://'):
+            avatar_url = f'https://{avatar_url.removeprefix("http://")}'
+        if '@' in avatar_url.rsplit('/', 1)[-1]:
+            return avatar_url
+        return f'{avatar_url}@96w_96h_1c_1s.webp'
+
     def _normalize_following_item(self, item: dict[str, Any]) -> dict[str, str]:
         return {
             'mid': str(item.get('mid') or ''),
             'name': item.get('uname') or item.get('name') or '',
+            'avatar_url': self._normalize_avatar_url(item.get('face') or item.get('avatar_url')),
             'sign': item.get('sign') or '',
         }
 

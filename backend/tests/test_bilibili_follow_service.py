@@ -5,7 +5,7 @@ from app.services.bilibili_follow_service import BilibiliFollowService
 
 
 class TestBilibiliFollowService(unittest.TestCase):
-    def test_get_followings_drops_avatar_fields_from_items(self):
+    def test_get_followings_returns_low_resolution_avatar_url(self):
         service = BilibiliFollowService(lambda _platform: 'DedeUserID=12345;')
         response = Mock()
         response.json.return_value = {
@@ -15,7 +15,7 @@ class TestBilibiliFollowService(unittest.TestCase):
                     {
                         'mid': 1,
                         'uname': '测试UP',
-                        'face': 'https://example.com/avatar.jpg',
+                        'face': 'http://i0.hdslb.com/bfs/face/avatar.jpg',
                         'sign': 'hello',
                     }
                 ],
@@ -31,6 +31,7 @@ class TestBilibiliFollowService(unittest.TestCase):
             {
                 'mid': '1',
                 'name': '测试UP',
+                'avatar_url': 'https://i0.hdslb.com/bfs/face/avatar.jpg@96w_96h_1c_1s.webp',
                 'sign': 'hello',
             }
         ])
