@@ -15,7 +15,8 @@ class TestNoteTaskList(unittest.TestCase):
             polished_result_path.write_text(
                 json.dumps(
                     {
-                        "markdown": "# Demo\n\n## 校对文字稿\n\nhello",
+                        "markdown": "# Demo\n\nhello",
+                        "mode": "polished_transcript",
                         "audio_meta": {
                             "title": "Demo",
                             "platform": "bilibili",
@@ -68,6 +69,7 @@ class TestNoteTaskList(unittest.TestCase):
         self.assertEqual(tasks[0]["task_id"], "task-polished")
         self.assertEqual(tasks[0]["status"], "SUCCESS")
         self.assertEqual(tasks[0]["message"], "done")
+        self.assertNotIn("## 校对文字稿", tasks[0]["result"]["markdown"])
         self.assertEqual(tasks[0]["result"]["audio_meta"]["title"], "Demo")
 
 

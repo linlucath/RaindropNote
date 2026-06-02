@@ -114,7 +114,8 @@ class TestTranscriptOnlyMode(unittest.TestCase):
         )
 
         self.assertIsNotNone(result)
-        self.assertIn("## 校对文字稿", result.markdown)
+        self.assertNotIn("## 校对文字稿", result.markdown)
+        self.assertIn("# 测试视频", result.markdown)
         self.assertIn("这是校对后的字幕文字稿。", result.markdown)
         self.assertNotIn("## 带时间戳文字稿", result.markdown)
         gpt.polish_transcript.assert_called_once()

@@ -775,7 +775,15 @@ def preview_bilibili_space_page(
 
 
 
-def _infer_result_mode(markdown: str) -> str:
+def _infer_result_mode(result_content: dict | str) -> str:
+    if isinstance(result_content, dict):
+        mode = result_content.get("mode")
+        if mode in {SUPPORTED_GENERATION_MODE, "transcript", "note"}:
+            return mode
+        markdown = result_content.get("markdown") or ""
+    else:
+        markdown = result_content
+
     if "## 校对文字稿" in markdown:
         return "polished_transcript"
     if "## 简体中文文字稿" in markdown:
@@ -797,7 +805,7 @@ def find_existing_task_id(video_id: str, mode: Optional[str] = None) -> Optional
             continue
         if (data.get("audio_meta") or {}).get("video_id") != video_id:
             continue
-        result_mode = _infer_result_mode(data.get("markdown") or "")
+        result_mode = _infer_result_mode(data)
         if result_mode != SUPPORTED_GENERATION_MODE:
             _delete_task_artifacts(path.stem, output_dir)
             NoteGenerator.delete_note(task_id=path.stem)

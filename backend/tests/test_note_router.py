@@ -115,7 +115,8 @@ class TestNoteRouter(unittest.TestCase):
                 (output_dir / f'{task_id}.json').write_text(
                     json.dumps(
                         {
-                            'markdown': f'# {task_id}\n\n## 校对文字稿\n\n内容',
+                            'markdown': f'# {task_id}\n\n内容',
+                            'mode': 'polished_transcript',
                             'audio_meta': {
                                 'video_id': 'BV1same',
                                 'platform': 'bilibili',
