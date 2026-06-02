@@ -2,7 +2,6 @@ import type { BatchVideo, FollowingUploader } from '@/services/note.ts'
 
 export type HomePageSourceType = 'single' | 'uploader_batch' | 'dynamics'
 export type HomePageUploaderSourceMode = 'manual' | 'followings'
-export type HomePageQuality = 'fast' | 'medium' | 'slow'
 
 export interface HomePageFormState {
   video_url: string
@@ -11,8 +10,6 @@ export interface HomePageFormState {
   batch_limit: number
   skip_existing: boolean
   platform: string
-  quality: HomePageQuality
-  model_name: string
 }
 
 export interface HomePagePreviewState {
@@ -37,9 +34,7 @@ export interface PersistedHomePageStateCandidate extends PersistedHomePageState 
   }
 }
 
-export const DEFAULT_HOME_PAGE_QUALITY: HomePageQuality = 'medium'
-
-export function createDefaultHomePageFormState(modelName = ''): HomePageFormState {
+export function createDefaultHomePageFormState(): HomePageFormState {
   return {
     platform: 'bilibili',
     source_type: 'single',
@@ -47,8 +42,6 @@ export function createDefaultHomePageFormState(modelName = ''): HomePageFormStat
     video_url: '',
     batch_limit: 0,
     skip_existing: true,
-    quality: DEFAULT_HOME_PAGE_QUALITY,
-    model_name: modelName,
   }
 }
 

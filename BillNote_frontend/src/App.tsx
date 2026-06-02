@@ -12,6 +12,7 @@ import { HomePage } from './pages/HomePage/Home.tsx'
 const SettingPage = lazy(() => import('./pages/SettingPage/index.tsx'))
 const ProgressPage = lazy(() => import('./pages/ProgressPage/index.tsx'))
 const FavoritesPage = lazy(() => import('./pages/FavoritesPage/index.tsx'))
+const GeneralSettings = lazy(() => import('@/pages/SettingPage/GeneralSettings.tsx'))
 const Model = lazy(() => import('@/pages/SettingPage/Model.tsx'))
 const ProviderForm = lazy(() => import('@/components/Form/modelForm/Form.tsx'))
 const AboutPage = lazy(() => import('@/pages/SettingPage/about.tsx'))
@@ -51,7 +52,8 @@ function App() {
               <Route path="progress" element={<ProgressPage />} />
               <Route path="favorites" element={<FavoritesPage />} />
               <Route path="settings" element={<SettingPage />}>
-                <Route index element={<Navigate to="model" replace />} />
+                <Route index element={<Navigate to="general" replace />} />
+                <Route path="general" element={<GeneralSettings />} />
                 <Route path="model" element={<Model />}>
                   <Route path="new" element={<ProviderForm isCreate />} />
                   <Route path=":id" element={<ProviderForm />} />

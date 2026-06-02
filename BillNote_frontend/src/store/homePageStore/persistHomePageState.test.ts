@@ -12,8 +12,6 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
       video_url: 'https://space.bilibili.com/123456',
       batch_limit: 20,
       skip_existing: false,
-      quality: 'slow',
-      model_name: 'deepseek-chat',
     },
     preview: {
       videos: [
@@ -47,8 +45,6 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
     video_url: 'https://space.bilibili.com/123456',
     batch_limit: 20,
     skip_existing: false,
-    quality: 'slow',
-    model_name: 'deepseek-chat',
   })
   assert.equal(persisted.preview.page, 2)
   assert.equal(persisted.preview.offset, 'next-offset')
@@ -60,14 +56,12 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
 })
 
 test('createDefaultHomePageFormState falls back to the default UI values', () => {
-  assert.deepEqual(createDefaultHomePageFormState('deepseek-chat'), {
+  assert.deepEqual(createDefaultHomePageFormState(), {
     platform: 'bilibili',
     source_type: 'single',
     uploader_source_mode: 'manual',
     video_url: '',
     batch_limit: 0,
     skip_existing: true,
-    quality: 'medium',
-    model_name: 'deepseek-chat',
   })
 })

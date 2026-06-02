@@ -17,7 +17,7 @@ interface HomePageStore {
   setPreviewState: (next: Partial<HomePagePreviewState>) => void
   replacePreviewState: (next: HomePagePreviewState) => void
   clearPreviewState: () => void
-  resetHomePageState: (defaultModelName?: string) => void
+  resetHomePageState: () => void
 }
 
 export const useHomePageStore = create<HomePageStore>()(
@@ -55,9 +55,9 @@ export const useHomePageStore = create<HomePageStore>()(
         set({
           preview: createEmptyHomePagePreviewState(),
         }),
-      resetHomePageState: defaultModelName =>
+      resetHomePageState: () =>
         set({
-          form: createDefaultHomePageFormState(defaultModelName),
+          form: createDefaultHomePageFormState(),
           preview: createEmptyHomePagePreviewState(),
         }),
     }),

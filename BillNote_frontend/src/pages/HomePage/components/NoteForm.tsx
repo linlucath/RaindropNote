@@ -32,10 +32,12 @@ import { getDownloaderCookie } from '@/services/downloader.ts'
 import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
 import { useHomePageStore } from '@/store/homePageStore'
+import { createDefaultHomePageFormState } from '@/store/homePageStore/persistHomePageState.ts'
 import {
-  createDefaultHomePageFormState,
-  DEFAULT_HOME_PAGE_QUALITY,
-} from '@/store/homePageStore/persistHomePageState.ts'
+  DEFAULT_GENERATION_QUALITY,
+  getPreferredDefaultModelName,
+  useGenerationSettingsStore,
+} from '@/store/generationSettingsStore'
 import {
   Tooltip,
   TooltipContent,
@@ -65,7 +67,6 @@ import {
 import { Input } from '@/components/ui/input.tsx'
 import { Switch } from '@/components/ui/switch.tsx'
 import { videoPlatforms } from '@/constant/note.ts'
-import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 
 const isYoutubeUploaderUrl = (value?: string) => {
@@ -91,11 +92,9 @@ const formSchema = z
     batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
     skip_existing: z.boolean().default(true).optional(),
     platform: z.string().nonempty('请选择平台'),
-    quality: z.enum(['fast', 'medium', 'slow']),
-    model_name: z.string().optional(),
   })
   .superRefine(
-    ({ video_url, platform, source_type, uploader_source_mode, model_name }, ctx) => {
+    ({ video_url, platform, source_type, uploader_source_mode }, ctx) => {
       if (source_type === 'uploader_batch') {
         if (uploader_source_mode === 'manual') {
           if (!video_url) {
@@ -132,30 +131,13 @@ const formSchema = z
           }
         }
       }
-      if (!model_name) {
-        ctx.addIssue({ code: 'custom', message: '请选择模型', path: ['model_name'] })
-      }
     }
   )
 
 export type NoteFormValues = z.infer<typeof formSchema>
 
 const PREVIEW_PAGE_SIZE = 20
-
-const getPreferredDefaultModelName = (
-  models: Array<{ model_name: string; provider_id: string }>
-) => {
-  if (!models.length) {
-    return ''
-  }
-
-  return (
-    models.find(model => model.provider_id === 'deepseek')?.model_name ||
-    models.find(model => model.model_name.toLowerCase().includes('deepseek'))?.model_name ||
-    models[0]?.model_name ||
-    ''
-  )
-}
+const BATCH_LIMIT_ALL = 0
 
 const getDynamicRequestPageSize = ({
   batchLimit,
@@ -207,7 +189,6 @@ const WorkspaceSection = ({
 
 /* -------------------- 主组件 -------------------- */
 const NoteForm = () => {
-  const navigate = useNavigate()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
   /* ---- 全局状态 ---- */
@@ -221,6 +202,9 @@ const NoteForm = () => {
   } = useTaskStore()
   const tasks = useTaskStore(state => state.tasks)
   const { loadEnabledModels, modelList } = useModelStore()
+  const generationModelName = useGenerationSettingsStore(state => state.model_name)
+  const generationQuality = useGenerationSettingsStore(state => state.quality)
+  const setGenerationSettings = useGenerationSettingsStore(state => state.setGenerationSettings)
   const initialHomePageStateRef = useRef(useHomePageStore.getState())
   const persistedFormState = initialHomePageStateRef.current.form
   const persistedPreviewState = initialHomePageStateRef.current.preview
@@ -233,6 +217,8 @@ const NoteForm = () => {
     () => getPreferredDefaultModelName(modelList),
     [modelList]
   )
+  const resolvedModelName = generationModelName || preferredDefaultModelName
+  const resolvedQuality = generationQuality || DEFAULT_GENERATION_QUALITY
 
   /* ---- 表单 ---- */
   const form = useForm<NoteFormValues>({
@@ -260,6 +246,7 @@ const NoteForm = () => {
   const [prefetchingFollowings, setPrefetchingFollowings] = useState(false)
   const followingsPrefetchStartedRef = useRef(false)
   const lastAutoLoadedUploaderMidRef = useRef<string | null>(null)
+  const dynamicsAutoLoadStartedRef = useRef(false)
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
   const sourceType = useWatch({ control: form.control, name: 'source_type' }) as
@@ -273,19 +260,8 @@ const NoteForm = () => {
   const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as
     | string
     | undefined
-  const watchedBatchLimit = useWatch({ control: form.control, name: 'batch_limit' }) as
-    | number
-    | undefined
   const watchedSkipExisting = useWatch({ control: form.control, name: 'skip_existing' }) as
     | boolean
-    | undefined
-  const watchedQuality = useWatch({ control: form.control, name: 'quality' }) as
-    | 'fast'
-    | 'medium'
-    | 'slow'
-    | undefined
-  const watchedModelName = useWatch({ control: form.control, name: 'model_name' }) as
-    | string
     | undefined
   const uploaderBatchMode = sourceType === 'uploader_batch'
   const dynamicsMode = sourceType === 'dynamics'
@@ -295,21 +271,21 @@ const NoteForm = () => {
     () =>
       JSON.stringify(
         dynamicsMode
-          ? { source: 'dynamics', limit: watchedBatchLimit ?? 0 }
+          ? { source: 'dynamics', limit: BATCH_LIMIT_ALL }
           : uploaderSourceMode === 'followings'
             ? {
                 source: 'followings',
                 mid: selectedUploader?.mid || '',
-                limit: watchedBatchLimit ?? 0,
+                limit: BATCH_LIMIT_ALL,
               }
             : {
                 source: 'manual',
                 platform,
                 space_url: (watchedVideoUrl || '').trim(),
-                limit: watchedBatchLimit ?? 0,
+                limit: BATCH_LIMIT_ALL,
               }
       ),
-    [dynamicsMode, platform, selectedUploader?.mid, uploaderSourceMode, watchedBatchLimit, watchedVideoUrl]
+    [dynamicsMode, platform, selectedUploader?.mid, uploaderSourceMode, watchedVideoUrl]
   )
   const previewDirty =
     batchMode &&
@@ -363,9 +339,19 @@ const NoteForm = () => {
     setSubmittingPreviewVideoIds([])
   }
 
-  const goModelAdd = () => {
-    navigate('/settings/model')
+  const getGenerationPayloadSettings = () => {
+    if (!resolvedModelName) {
+      return null
+    }
+
+    const selectedModel = modelList.find(model => model.model_name === resolvedModelName)
+    return {
+      model_name: resolvedModelName,
+      quality: resolvedQuality,
+      provider_id: selectedModel?.provider_id,
+    }
   }
+
   /* ---- 副作用 ---- */
   useEffect(() => {
     loadEnabledModels()
@@ -373,48 +359,34 @@ const NoteForm = () => {
     return
   }, [loadEnabledModels])
   useEffect(() => {
-    const currentModelName = form.getValues('model_name')
     if (!preferredDefaultModelName) {
       return
     }
 
-    if (!currentModelName) {
-      form.setValue('model_name', preferredDefaultModelName, {
-        shouldDirty: false,
-        shouldTouch: false,
-        shouldValidate: false,
-      })
+    if (!generationModelName) {
+      setGenerationSettings({ model_name: preferredDefaultModelName })
       return
     }
 
-    const currentModelStillExists = modelList.some(model => model.model_name === currentModelName)
+    const currentModelStillExists = modelList.some(model => model.model_name === generationModelName)
     if (!currentModelStillExists) {
-      form.setValue('model_name', preferredDefaultModelName, {
-        shouldDirty: false,
-        shouldTouch: false,
-        shouldValidate: false,
-      })
+      setGenerationSettings({ model_name: preferredDefaultModelName })
     }
-  }, [form, modelList, preferredDefaultModelName])
+  }, [generationModelName, modelList, preferredDefaultModelName, setGenerationSettings])
   useEffect(() => {
     setPersistedFormState({
       platform: platform || 'bilibili',
       source_type: sourceType || 'single',
       uploader_source_mode: uploaderSourceMode || 'manual',
       video_url: watchedVideoUrl || '',
-      batch_limit: watchedBatchLimit ?? 0,
+      batch_limit: BATCH_LIMIT_ALL,
       skip_existing: watchedSkipExisting ?? true,
-      quality: watchedQuality || DEFAULT_HOME_PAGE_QUALITY,
-      model_name: watchedModelName || '',
     })
   }, [
     platform,
     setPersistedFormState,
     sourceType,
     uploaderSourceMode,
-    watchedBatchLimit,
-    watchedModelName,
-    watchedQuality,
     watchedSkipExisting,
     watchedVideoUrl,
   ])
@@ -499,9 +471,7 @@ const NoteForm = () => {
       source_type: formData.source_type || 'single',
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
-      model_name: formData.model_name || preferredDefaultModelName,
-      quality: formData.quality || DEFAULT_HOME_PAGE_QUALITY,
-      batch_limit: formData.batch_limit ?? 0,
+      batch_limit: BATCH_LIMIT_ALL,
       skip_existing: formData.skip_existing ?? true,
     })
     replacePersistedFormState({
@@ -509,9 +479,7 @@ const NoteForm = () => {
       source_type: formData.source_type || 'single',
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
-      model_name: formData.model_name || preferredDefaultModelName,
-      quality: formData.quality || DEFAULT_HOME_PAGE_QUALITY,
-      batch_limit: formData.batch_limit ?? 0,
+      batch_limit: BATCH_LIMIT_ALL,
       skip_existing: formData.skip_existing ?? true,
     })
     resetPreviewUiState()
@@ -522,7 +490,6 @@ const NoteForm = () => {
     currentTaskId,
     form,
     getCurrentTask,
-    preferredDefaultModelName,
     replacePersistedFormState,
   ])
 
@@ -530,18 +497,15 @@ const NoteForm = () => {
     const values = form.getValues()
     const sourceMode = values.uploader_source_mode
     const dynamicsSource = values.source_type === 'dynamics'
-    const valid = await form.trigger(
+    const valid =
       values.source_type === 'uploader_batch' && sourceMode === 'manual'
-        ? ['video_url', 'batch_limit']
-        : ['batch_limit']
-    )
+        ? await form.trigger(['video_url'])
+        : true
     if (!valid) {
       toast.error(
-        dynamicsSource || sourceMode !== 'manual'
-          ? '请先确认最多视频数'
-          : values.platform === 'youtube'
-            ? '请先填写有效的 YouTube 频道主页链接'
-            : '请先填写有效的 UP 主主页链接'
+        values.platform === 'youtube'
+          ? '请先填写有效的 YouTube 频道主页链接'
+          : '请先填写有效的 UP 主主页链接'
       )
       return
     }
@@ -551,7 +515,7 @@ const NoteForm = () => {
     }
     const effectivePageSize = dynamicsSource
       ? getDynamicRequestPageSize({
-          batchLimit: values.batch_limit ?? 0,
+          batchLimit: BATCH_LIMIT_ALL,
           loadedCount: reset ? 0 : previewVideos.length,
         })
       : PREVIEW_PAGE_SIZE
@@ -585,13 +549,13 @@ const NoteForm = () => {
               mid: selectedUploader?.mid || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
-              limit: values.batch_limit ?? 0,
+              limit: BATCH_LIMIT_ALL,
             })) as UploaderVideoPage) || uploaderFallbackPayload
           : ((await previewBatchVideos({
               space_url: values.video_url || '',
               page: nextPage,
               page_size: PREVIEW_PAGE_SIZE,
-              limit: values.batch_limit ?? 0,
+              limit: BATCH_LIMIT_ALL,
             })) as UploaderVideoPage) || uploaderFallbackPayload
       const videos = getUniqueBatchVideos(payload.items || [])
       const nextPreviewState = getNextBatchPreviewState({
@@ -606,30 +570,24 @@ const NoteForm = () => {
       } else {
         setPreviewPage((payload as UploaderVideoPage).page)
       }
-      setPreviewHasMore(
-        dynamicsSource
-          ? payload.has_more &&
-              ((values.batch_limit ?? 0) <= 0 ||
-                nextPreviewState.videos.length < (values.batch_limit ?? 0))
-          : payload.has_more
-      )
+      setPreviewHasMore(payload.has_more)
 
       if (reset) {
         setPreviewSignature(
           JSON.stringify(
             dynamicsSource
-              ? { source: 'dynamics', limit: values.batch_limit ?? 0 }
+              ? { source: 'dynamics', limit: BATCH_LIMIT_ALL }
               : sourceMode === 'followings'
                 ? {
                     source: 'followings',
                     mid: selectedUploader?.mid || '',
-                    limit: values.batch_limit ?? 0,
+                    limit: BATCH_LIMIT_ALL,
                   }
                 : {
                     source: 'manual',
                     platform: values.platform,
                     space_url: (values.video_url || '').trim(),
-                    limit: values.batch_limit ?? 0,
+                    limit: BATCH_LIMIT_ALL,
                   }
           )
         )
@@ -681,6 +639,32 @@ const NoteForm = () => {
     previewLoadingMore,
   ])
 
+  useEffect(() => {
+    if (!dynamicsMode) {
+      dynamicsAutoLoadStartedRef.current = false
+      return
+    }
+
+    if (batchLoading || previewLoadingMore || dynamicsAutoLoadStartedRef.current) {
+      return
+    }
+
+    if (previewVideos.length > 0 && !previewDirty) {
+      dynamicsAutoLoadStartedRef.current = true
+      return
+    }
+
+    dynamicsAutoLoadStartedRef.current = true
+    void loadPreviewBatchPage(true)
+  }, [
+    batchLoading,
+    dynamicsMode,
+    loadPreviewBatchPage,
+    previewDirty,
+    previewLoadingMore,
+    previewVideos.length,
+  ])
+
   /* ---- 帮助函数 ---- */
   const isGenerating = () => {
     const status = getCurrentTask()?.status
@@ -707,10 +691,10 @@ const NoteForm = () => {
 
   const getPreviewRefreshErrorMessage = (values: NoteFormValues) =>
     values.source_type === 'dynamics'
-      ? '关注动态或视频数已变更，请先重新拉取视频列表'
+      ? '关注动态已变更，请先重新拉取视频列表'
       : values.uploader_source_mode === 'followings'
-        ? '已选择的 UP 主或视频数已变更，请先重新拉取视频列表'
-        : 'UP 主链接或视频数已变更，请先重新拉取视频列表'
+        ? '已选择的 UP 主已变更，请先重新拉取视频列表'
+        : 'UP 主链接已变更，请先重新拉取视频列表'
 
   const focusTask = (taskId: string) => {
     setCurrentTask(taskId)
@@ -718,20 +702,20 @@ const NoteForm = () => {
   }
 
   const submitPreviewVideo = async (video: BatchVideo, retryTaskId?: string) => {
-    const valid = await form.trigger(['model_name'])
-    if (!valid) {
-      toast.error('请先选择模型')
+    const generationSettings = getGenerationPayloadSettings()
+    if (!generationSettings) {
+      toast.error('请先在全局配置中选择模型')
       return
     }
 
     const values = form.getValues()
-    const selectedModel = modelList.find(model => model.model_name === values.model_name)
     const payload = {
       ...values,
+      ...generationSettings,
+      batch_limit: BATCH_LIMIT_ALL,
       video_url: video.video_url,
       platform: video.platform || values.platform,
       mode: 'polished_transcript' as GenerationMode,
-      provider_id: selectedModel?.provider_id,
     }
 
     setSubmittingPreviewVideoIds(current =>
@@ -780,7 +764,12 @@ const NoteForm = () => {
   }
 
   const onSubmit = async (values: NoteFormValues) => {
-    const selectedModel = modelList.find(m => m.model_name === values.model_name)
+    const generationSettings = getGenerationPayloadSettings()
+    if (!generationSettings) {
+      toast.error('请先在全局配置中选择模型')
+      return
+    }
+
     const resolvedMode: GenerationMode = 'polished_transcript'
     const reuseCurrentTask = shouldReuseTaskForSubmission({
       currentTaskId,
@@ -795,8 +784,9 @@ const NoteForm = () => {
 
     const payload = {
       ...values,
+      ...generationSettings,
+      batch_limit: BATCH_LIMIT_ALL,
       mode: resolvedMode,
-      provider_id: selectedModel?.provider_id,
       task_id: reuseCurrentTask ? currentTaskId || '' : undefined,
     }
     if (reuseCurrentTask) {
@@ -812,10 +802,10 @@ const NoteForm = () => {
     // message.error('请完善所有必填项后再提交')
   }
   const handleCreateNew = () => {
-    const nextFormState = createDefaultHomePageFormState(preferredDefaultModelName)
+    const nextFormState = createDefaultHomePageFormState()
     form.reset(nextFormState)
     resetPreviewUiState()
-    resetPersistedHomePageState(preferredDefaultModelName)
+    resetPersistedHomePageState()
     setCurrentTask(null)
   }
   const FormButton = () => {
@@ -916,39 +906,35 @@ const NoteForm = () => {
                   name="uploader_source_mode"
                   render={({ field }) => (
                     <FormItem>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { value: 'manual', label: '手动输入主页' },
-                          { value: 'followings', label: '从关注列表选择' },
-                        ].map(option => {
-                          const active = field.value === option.value
-                          const disabled =
-                            option.value === 'followings' && platform !== 'bilibili'
-                          return (
-                            <button
+                      <Select
+                        value={field.value}
+                        onValueChange={value => {
+                          field.onChange(value)
+                          resetPreviewUiState({
+                            clearSelectedUploader: value !== 'followings',
+                          })
+                        }}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {[
+                            { value: 'manual', label: '手动输入主页' },
+                            { value: 'followings', label: '从关注列表选择' },
+                          ].map(option => (
+                            <SelectItem
                               key={option.value}
-                              type="button"
-                              disabled={disabled}
-                              className={`h-9 rounded-md border px-3 text-sm transition-colors ${
-                                active
-                                  ? 'border-neutral-800 bg-neutral-900 text-white'
-                                  : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50'
-                              } ${disabled ? 'cursor-not-allowed opacity-50 hover:bg-white' : ''}`}
-                              onClick={() => {
-                                if (disabled) {
-                                  return
-                                }
-                                field.onChange(option.value)
-                                resetPreviewUiState({
-                                  clearSelectedUploader: option.value !== 'followings',
-                                })
-                              }}
+                              value={option.value}
+                              disabled={option.value === 'followings' && platform !== 'bilibili'}
                             >
                               {option.label}
-                            </button>
-                          )
-                        })}
-                      </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </FormItem>
                   )}
                 />
@@ -1059,25 +1045,14 @@ const NoteForm = () => {
 
               {batchMode && (
                 <div className="rounded-md bg-neutral-50 px-3 py-2">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
-                    <FormField
-                      control={form.control}
-                      name="batch_limit"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-xs text-neutral-500">最多视频数</FormLabel>
-                          <Input className="h-8" type="number" min={0} max={500} {...field} />
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                  <div className="flex items-center justify-between gap-3">
                     <FormField
                       control={form.control}
                       name="skip_existing"
                       render={({ field }) => (
-                        <FormItem>
+                        <FormItem className="flex w-full items-center justify-between gap-3">
                           <FormLabel className="text-xs text-neutral-500">跳过已处理</FormLabel>
-                          <div className="flex h-8 items-center justify-end">
+                          <div className="flex h-8 items-center">
                             <Switch checked={!!field.value} onCheckedChange={field.onChange} />
                           </div>
                           <FormMessage />
@@ -1115,21 +1090,13 @@ const NoteForm = () => {
               {dynamicsMode ? (
                 <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-3 text-sm text-neutral-600">
-                    <span>从关注动态里选择投稿视频，点击后立即开始转写。</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-8 px-3"
-                      disabled={batchLoading}
-                      onClick={handlePreviewBatch}
-                    >
-                      {batchLoading ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                      )}
-                      拉取关注动态
-                    </Button>
+                    <span>关注动态会自动加载，从列表里选择投稿视频后立即开始转写。</span>
+                    {batchLoading ? (
+                      <span className="inline-flex items-center gap-2 text-xs text-sky-700">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        正在加载
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -1196,7 +1163,7 @@ const NoteForm = () => {
                   showPreviewButton={false}
                   emptyMessage={
                     dynamicsMode
-                      ? '先拉取关注动态，再点击要处理的视频'
+                      ? '关注动态会自动加载，稍候选择要处理的视频'
                       : uploaderSourceMode === 'followings'
                         ? '先从关注列表选择一个 UP 主，视频列表会自动加载'
                         : '粘贴 UP 主主页后拉取视频标题'
@@ -1204,10 +1171,10 @@ const NoteForm = () => {
                   stale={previewDirty}
                   staleMessage={
                     dynamicsMode
-                      ? '你修改了最多视频数，当前标题列表不再对应最新条件。'
+                      ? '关注动态条件已变更，当前标题列表不再对应最新条件。'
                       : uploaderSourceMode === 'followings'
-                        ? '你修改了所选 UP 主或最多视频数，当前标题列表不再对应最新条件。'
-                        : '你修改了 UP 主链接或最多视频数，当前标题列表不再对应最新条件。'
+                        ? '你修改了所选 UP 主，当前标题列表不再对应最新条件。'
+                        : '你修改了 UP 主链接，当前标题列表不再对应最新条件。'
                   }
                   onPreview={handlePreviewBatch}
                   onLoadMore={() => void loadPreviewBatchPage(false)}
@@ -1219,79 +1186,15 @@ const NoteForm = () => {
                 {previewVideos.length > 0 && !previewDirty && (
                   <div className="text-xs text-neutral-500">
                     {dynamicsMode
-                      ? '当前列表已锁定到这次拉取结果。修改最多视频数后，需要重新拉取再点击视频。'
+                      ? '当前列表已锁定到这次拉取结果。条件变化后，需要重新拉取再点击视频。'
                       : `当前列表已锁定到这次拉取结果。修改${
                           uploaderSourceMode === 'followings' ? '所选 UP 主' : '链接'
-                        }或视频数后，需要重新拉取再点击视频。`}
+                        }后，需要重新拉取再点击视频。`}
                   </div>
                 )}
               </div>
             </WorkspaceSection>
           )}
-
-          <WorkspaceSection title={batchMode ? '3. 生成设置' : '生成设置'}>
-            <div className="space-y-3">
-              {modelList.length > 0 ? (
-                <FormField
-                  control={form.control}
-                  name="model_name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>模型</FormLabel>
-                      <Select
-                        onOpenChange={() => {
-                          loadEnabledModels()
-                        }}
-                        value={field.value}
-                        onValueChange={field.onChange}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full min-w-0 truncate">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {modelList.map(m => (
-                            <SelectItem key={m.id} value={m.model_name}>
-                              {m.model_name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              ) : (
-                <Button type="button" variant="outline" className="w-full" onClick={goModelAdd}>
-                  请先添加模型
-                </Button>
-              )}
-
-              <FormField
-                control={form.control}
-                name="quality"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>处理速度</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl>
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="fast">快速</SelectItem>
-                        <SelectItem value="medium">均衡</SelectItem>
-                        <SelectItem value="slow">精细</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </WorkspaceSection>
 
           <div className="sticky bottom-0 z-10 -mx-1 bg-white/95 px-1 pt-2 pb-1 backdrop-blur">
             <FormButton />
