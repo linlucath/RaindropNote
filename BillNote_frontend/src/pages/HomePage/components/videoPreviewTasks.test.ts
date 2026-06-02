@@ -32,6 +32,28 @@ test('buildPreviewStatusItems matches preview videos to the newest local task by
   ])
 })
 
+test('buildPreviewStatusItems marks backend-processed preview videos as successful existing tasks', () => {
+  const items = buildPreviewStatusItems({
+    videos: [
+      {
+        video_id: 'video-1',
+        video_url: 'https://example.com/1',
+        processed_task_id: 'existing-task-1',
+      },
+    ],
+    tasks: [],
+  })
+
+  assert.deepEqual(items, [
+    {
+      video_id: 'video-1',
+      status: 'SUCCESS',
+      task_id: 'existing-task-1',
+      message: '已处理',
+    },
+  ])
+})
+
 test('resolvePreviewVideoAction opens active or successful tasks and resubmits failed ones', () => {
   assert.equal(resolvePreviewVideoAction(undefined), 'submit')
   assert.equal(resolvePreviewVideoAction({ video_id: 'video-1', status: 'SUCCESS' }), 'open')
