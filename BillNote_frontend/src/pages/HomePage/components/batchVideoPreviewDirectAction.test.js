@@ -17,3 +17,8 @@ test('BatchVideoPreview exposes direct action copy instead of checkbox selection
   assert.doesNotMatch(source, /全选/)
   assert.doesNotMatch(source, /全不选/)
 })
+
+test('BatchVideoPreview does not show video count badges in the selection section', () => {
+  assert.doesNotMatch(source, /共\s*\{uniqueVideos\.length\}\s*条/)
+  assert.doesNotMatch(source, /已去重\s*\{uniqueVideos\.length\}\s*条/)
+})
