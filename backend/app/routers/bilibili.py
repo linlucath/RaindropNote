@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query
 
-from app.routers.batch import preview_bilibili_space_page
+from app.routers.batch import mark_processed_page_items, preview_bilibili_space_page
 from app.services.bilibili_dynamic_service import BilibiliDynamicService
 from app.services.bilibili_follow_service import BilibiliFollowService
 from app.services.cookie_manager import CookieConfigManager
@@ -60,4 +60,4 @@ def get_followed_dynamics(
         return R.error(msg=str(exc))
     except Exception as exc:  # pragma: no cover - defensive fallback
         return R.error(msg=f'获取关注动态失败: {exc}')
-    return R.success(data=data)
+    return R.success(data=mark_processed_page_items(data))

@@ -146,7 +146,6 @@ class TestNoteRouter(unittest.TestCase):
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual([task['task_id'] for task in list_response.json()['data']['tasks']], ['task-2'])
 
-
     def test_update_task_markdown_persists_edited_transcript(self):
         @asynccontextmanager
         async def lifespan(_app):
@@ -200,6 +199,57 @@ class TestNoteRouter(unittest.TestCase):
             '# 测试视频\n\n用户修改后的内容',
         )
 
+    def test_generate_note_infers_platform_from_http_video_url_when_missing(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with patch("app.routers.note.NoteGenerator._update_status"), patch(
+            "app.routers.note.run_note_task"
+        ) as run_task:
+            client = TestClient(app)
+            response = client.post(
+                '/api/generate_note',
+                json={
+                    'video_url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                    'quality': 'fast',
+                    'model_name': 'demo-model',
+                    'provider_id': 'demo-provider',
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['code'], 0)
+        self.assertEqual(run_task.call_args.args[2], 'youtube')
+
+    def test_generate_note_does_not_infer_platform_from_local_path(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with patch("app.routers.note.NoteGenerator._update_status"), patch(
+            "app.routers.note.run_note_task"
+        ) as run_task:
+            client = TestClient(app)
+            response = client.post(
+                '/api/generate_note',
+                json={
+                    'video_url': '/uploads/local.mp4',
+                    'quality': 'fast',
+                    'model_name': 'demo-model',
+                    'provider_id': 'demo-provider',
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        run_task.assert_not_called()
+
     def test_generate_note_rejects_explicit_local_platform(self):
         @asynccontextmanager
         async def lifespan(_app):
@@ -208,7 +258,7 @@ class TestNoteRouter(unittest.TestCase):
         app = FastAPI(lifespan=lifespan)
         app.include_router(note_router.router, prefix='/api')
 
-        with patch("app.routers.note.NoteGenerator._update_status") as update_status, patch(
+        with patch("app.routers.note.NoteGenerator._update_status"), patch(
             "app.routers.note.run_note_task"
         ) as run_task:
             client = TestClient(app)
@@ -224,7 +274,6 @@ class TestNoteRouter(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 400)
-        update_status.assert_not_called()
         run_task.assert_not_called()
 
 

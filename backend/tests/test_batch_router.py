@@ -232,6 +232,25 @@ class TestBatchRouter(unittest.TestCase):
             end=3,
         )
 
+    def test_preview_page_marks_processed_videos_with_existing_task_id(self):
+        with patch("app.routers.batch._extract_flat_playlist", return_value={
+            "entries": [
+                {"id": "BV1", "title": "已处理视频"},
+                {"id": "BV2", "title": "未处理视频"},
+            ]
+        }), patch("app.routers.batch.find_existing_task_id", side_effect=lambda video_id, mode=None: {
+            "BV1": "existing-task-1",
+        }.get(video_id)):
+            payload = batch.preview_bilibili_space_page(
+                "https://example.com/videos",
+                page=1,
+                page_size=2,
+                limit=0,
+            )
+
+        self.assertEqual(payload["items"][0]["processed_task_id"], "existing-task-1")
+        self.assertNotIn("processed_task_id", payload["items"][1])
+
     def test_preview_page_respects_limit_and_stops_loading_more(self):
         with patch("app.routers.batch._extract_flat_playlist", return_value={
             "entries": [
@@ -828,7 +847,8 @@ class TestBatchRouter(unittest.TestCase):
             result = Path(tmp) / "task-1.json"
             result.write_text(
                 json.dumps({
-                    "markdown": "# 标题\n\n## 校对文字稿\n\n内容",
+                    "markdown": "# 标题\n\n内容",
+                    "mode": "polished_transcript",
                     "audio_meta": {"video_id": "BV123"},
                 }, ensure_ascii=False),
                 encoding="utf-8",
@@ -851,7 +871,8 @@ class TestBatchRouter(unittest.TestCase):
             polished_transcript = Path(tmp) / "polished-transcript.json"
             polished_transcript.write_text(
                 json.dumps({
-                    "markdown": "# 标题\n\n## 校对文字稿\n\n校对文字",
+                    "markdown": "# 标题\n\n校对文字",
+                    "mode": "polished_transcript",
                     "audio_meta": {"video_id": "BV123"},
                 }, ensure_ascii=False),
                 encoding="utf-8",

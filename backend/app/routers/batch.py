@@ -662,6 +662,24 @@ def preview_bilibili_space(space_url: str, limit: int = 10) -> list[dict]:
     return _enrich_missing_titles(limited_videos)
 
 
+def mark_processed_videos(videos: list[dict], mode: Optional[str] = None) -> list[dict]:
+    marked_videos = []
+    for video in videos:
+        marked_video = dict(video)
+        existing_task_id = find_existing_task_id(str(video.get("video_id") or ""), mode)
+        if existing_task_id:
+            marked_video["processed_task_id"] = existing_task_id
+        marked_videos.append(marked_video)
+    return marked_videos
+
+
+def mark_processed_page_items(payload: dict, mode: Optional[str] = None) -> dict:
+    return {
+        **payload,
+        "items": mark_processed_videos(payload.get("items") or [], mode),
+    }
+
+
 def preview_bilibili_space_page(
     space_url: str,
     page: int = 1,
@@ -670,11 +688,13 @@ def preview_bilibili_space_page(
 ) -> dict:
     if _infer_platform_from_url(space_url) == "youtube":
         try:
-            return _preview_youtube_popular_channel_page(
-                space_url=space_url,
-                page=page,
-                page_size=page_size,
-                limit=limit,
+            return mark_processed_page_items(
+                _preview_youtube_popular_channel_page(
+                    space_url=space_url,
+                    page=page,
+                    page_size=page_size,
+                    limit=limit,
+                )
             )
         except Exception:
             pass
@@ -714,22 +734,24 @@ def preview_bilibili_space_page(
             if uploads_playlist_url:
                 uploads_data = _extract_flat_playlist(uploads_playlist_url, start=start, end=end)
                 videos = normalize_youtube_entries(uploads_data.get("entries") or [])[:fetch_size]
-        return {
+        return mark_processed_page_items({
             "items": videos[:page_size],
             "page": page,
             "page_size": page_size,
             "has_more": len(videos) > page_size,
             "total": limit if limit > 0 else None,
-        }
+        })
 
     mid, order = _parse_bilibili_space_video_request(space_url)
     if mid:
-        return _uploader_video_service.get_uploader_videos_page(
-            mid=mid,
-            page=page,
-            page_size=page_size,
-            limit=limit,
-            order=order,
+        return mark_processed_page_items(
+            _uploader_video_service.get_uploader_videos_page(
+                mid=mid,
+                page=page,
+                page_size=page_size,
+                limit=limit,
+                order=order,
+            )
         )
 
     space_url = _apply_default_bilibili_space_order(space_url)
@@ -765,13 +787,13 @@ def preview_bilibili_space_page(
     has_more = len(videos) > page_size
     visible_videos = _enrich_missing_titles(videos[:page_size])
     total = limit if limit > 0 else None
-    return {
+    return mark_processed_page_items({
         "items": visible_videos,
         "page": page,
         "page_size": page_size,
         "has_more": has_more,
         "total": total,
-    }
+    })
 
 
 
