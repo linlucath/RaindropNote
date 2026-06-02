@@ -473,9 +473,10 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center space-y-4 text-neutral-500">
         <StepBar steps={steps} currentStep={taskStatus} />
-        <Loading className="h-5 w-5" />
+        <Loading />
         <div className="text-center text-sm">
-          <p className="text-lg font-bold">正在生成文字稿</p>
+          <p className="text-lg font-bold">正在生成文字稿，请稍候…</p>
+          <p className="mt-2 text-xs text-neutral-500">这可能需要几秒钟时间，取决于视频长度</p>
         </div>
       </div>
     )
@@ -486,7 +487,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       <div className="flex h-screen w-full flex-col items-center justify-center space-y-3 text-neutral-500">
         <Idle />
         <div className="text-center">
-          <p className="text-lg font-bold">暂无文字稿</p>
+          <p className="text-lg font-bold">输入视频链接并点击"生成文字稿"</p>
+          <p className="mt-2 text-xs text-neutral-500">支持哔哩哔哩、YouTube 、抖音等视频平台</p>
         </div>
       </div>
     )
@@ -501,7 +503,10 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
           <p className="text-lg font-bold text-red-500">
             {cancelled ? '任务已取消' : '文字稿生成失败'}
           </p>
-          {!cancelled ? (
+          <p className="mt-2 mb-2 text-xs text-red-400">
+            {cancelled ? '这个任务已经停止，不会继续执行。' : '请检查后台或稍后再试'}
+          </p>
+          {!cancelled && currentTask ? (
             <Button
               onClick={() => {
                 setCurrentTask(currentTask.id)
@@ -586,7 +591,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
               <div className="bg-primary-light mb-4 flex h-16 w-16 items-center justify-center rounded-full">
                 <ArrowRight className="text-primary h-8 w-8" />
               </div>
-              <p className="mb-2 text-neutral-600">暂无文字稿</p>
+              <p className="mb-2 text-neutral-600">输入视频链接并点击"生成文字稿"按钮</p>
+              <p className="text-xs text-neutral-500">支持哔哩哔哩、YouTube等视频网站</p>
             </div>
           </div>
         )}
