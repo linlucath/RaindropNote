@@ -500,7 +500,6 @@ class NoteGenerator:
         title = self._normalize_transcript_text(audio_meta.title or "未命名视频")
         markdown = "\n\n".join([
             f"# {title}",
-            "## 校对文字稿",
             polished_text,
         ]).strip()
         markdown_cache_file.write_text(markdown, encoding="utf-8")

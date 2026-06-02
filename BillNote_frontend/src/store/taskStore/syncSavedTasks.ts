@@ -35,7 +35,8 @@ function restoreTask(item: SavedTaskItem): Task | null {
     (typeof rawInfo.url === 'string' && rawInfo.url) ||
     ''
   const markdown = typeof result.markdown === 'string' ? result.markdown : ''
-  const isPolishedTranscript = markdown.includes('## 校对文字稿')
+  const isPolishedTranscript =
+    result.mode === 'polished_transcript' || markdown.includes('## 校对文字稿')
 
   if (!item?.task_id || !markdown || !isPolishedTranscript) return null
 

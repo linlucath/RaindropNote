@@ -95,6 +95,9 @@ def _normalize_generation_mode(mode: Optional[str]) -> str:
 
 
 def _is_polished_transcript_result(result_content: dict) -> bool:
+    if result_content.get("mode") == SUPPORTED_GENERATION_MODE:
+        return True
+
     markdown = result_content.get("markdown")
     return isinstance(markdown, str) and "## 校对文字稿" in markdown
 
@@ -200,10 +203,12 @@ def _delete_task_artifacts(task_id: str, output_dir: Path) -> int:
     return deleted_files
 
 
-def save_note_to_file(task_id: str, note):
+def save_note_to_file(task_id: str, note, mode: str = SUPPORTED_GENERATION_MODE):
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
+    payload = asdict(note)
+    payload["mode"] = mode
     with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
-        json.dump(asdict(note), f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
@@ -242,7 +247,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
     if not note or not note.markdown:
         logger.warning(f"任务 {task_id} 执行失败，跳过保存")
         return
-    save_note_to_file(task_id, note)
+    save_note_to_file(task_id, note, mode=mode)
 
 @router.post('/delete_task')
 def delete_task(data: RecordRequest):

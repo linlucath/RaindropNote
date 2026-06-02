@@ -83,7 +83,8 @@ test('buildSyncedTasksState keeps pending local-only tasks while still syncing s
         status: 'SUCCESS',
         created_at: 1_778_730_000,
         result: {
-          markdown: '# 标题\n\n## 校对文字稿\n\nsynced',
+          markdown: '# 标题\n\nsynced',
+          mode: 'polished_transcript',
           audio_meta: {
             video_id: 'BVsuccess',
             platform: 'bilibili',
@@ -139,7 +140,8 @@ test('buildSyncedTasksState drops legacy note and raw transcript history returne
         status: 'SUCCESS',
         created_at: 1_778_730_002,
         result: {
-          markdown: '# 标题\n\n## 校对文字稿\n\n保留内容',
+          markdown: '# 标题\n\n保留内容',
+          mode: 'polished_transcript',
           audio_meta: {
             video_id: 'BVpolished',
             platform: 'bilibili',
