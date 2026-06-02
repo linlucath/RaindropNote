@@ -99,18 +99,6 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
             </div>
             <div className={'mt-2 flex items-center justify-between text-[10px]'}>
               <div className="shrink-0">
-                {task.formData?.mode === 'polished_transcript' && (
-                  <div
-                    className={'mr-1 inline-block rounded bg-neutral-700 px-2 py-0.5 text-center text-white'}
-                  >
-                    文字稿
-                  </div>
-                )}
-                {task.status === 'SUCCESS' && (
-                  <div className={'bg-primary inline-block w-10 rounded p-0.5 text-center text-white'}>
-                    已完成
-                  </div>
-                )}
                 {task.status === 'CANCELLED' && (
                   <div className={'inline-block w-10 rounded bg-neutral-500 p-0.5 text-center text-white'}>
                     已取消
@@ -151,13 +139,6 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                   </Tooltip>
                 </TooltipProvider>
               </div>
-              {/*<div className="shrink-0">*/}
-              {/*  {task.status === 'SUCCESS' && <Badge variant="default">已完成</Badge>}*/}
-              {/*  {task.status !== 'SUCCESS' && task.status === 'FAILED' && (*/}
-              {/*    <Badge variant="outline">等待中</Badge>*/}
-              {/*  )}*/}
-              {/*  {task.status === 'FAILED' && <Badge variant="destructive">失败</Badge>}*/}
-              {/*</div>*/}
             </div>
           </div>
         ))}
