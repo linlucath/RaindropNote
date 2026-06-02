@@ -16,10 +16,7 @@ test('NoteForm exposes dynamics as a top-level source type', () => {
 
 test('NoteForm renders task type with the shared select control', () => {
   const fieldStart = source.indexOf('name="source_type"')
-  const nextSection = source.indexOf(
-    "<WorkspaceSection title={batchMode ? '1. 视频来源' : '视频来源'}>",
-    fieldStart
-  )
+  const nextSection = source.indexOf('<WorkspaceSection title={sourceSectionTitle}>', fieldStart)
   const sourceTypeField = source.slice(fieldStart, nextSection)
 
   assert.match(sourceTypeField, /<Select[\s\S]*value=\{field\.value\}/)
@@ -51,6 +48,14 @@ test('NoteForm renders uploader source mode with the shared select control', () 
   assert.match(uploaderSourceModeField, /disabled=\{option\.value === 'followings' && platform !== 'bilibili'\}/)
   assert.doesNotMatch(uploaderSourceModeField, /grid grid-cols-2/)
   assert.doesNotMatch(uploaderSourceModeField, /<button/)
+})
+
+test('NoteForm does not render an empty source section for followed dynamics', () => {
+  assert.match(source, /const showSourceSection = !dynamicsMode/)
+  assert.match(source, /\{showSourceSection && \(/)
+  assert.match(source, /const videoSectionTitle = dynamicsMode \? '1\. 选择视频' : '2\. 选择视频'/)
+  assert.match(source, /<WorkspaceSection title=\{videoSectionTitle\}>/)
+  assert.doesNotMatch(source, /dynamicsMode && batchLoading/)
 })
 
 test('NoteForm auto-loads followed dynamics without a manual fetch button', () => {
