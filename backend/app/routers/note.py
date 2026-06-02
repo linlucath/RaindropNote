@@ -3,6 +3,7 @@ import json
 import os
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -41,6 +42,18 @@ class RecordRequest(BaseModel):
 
 class CancelTaskRequest(BaseModel):
     task_id: str
+
+
+class UpdateTaskMarkdownRequest(BaseModel):
+    task_id: str
+    markdown: str
+
+    @field_validator("task_id")
+    def validate_task_id(cls, v):
+        task_id = v.strip()
+        if not task_id or "/" in task_id or "\\" in task_id:
+            raise ValueError("非法任务 ID")
+        return task_id
 
 
 class VideoRequest(BaseModel):
@@ -211,6 +224,13 @@ def save_note_to_file(task_id: str, note, mode: str = SUPPORTED_GENERATION_MODE)
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
@@ -270,6 +290,44 @@ def delete_task(data: RecordRequest):
         )
     except Exception as e:
         return R.error(msg=e)
+
+
+@router.post('/update_task_markdown')
+def update_task_markdown(data: UpdateTaskMarkdownRequest):
+    output_dir = Path(NOTE_OUTPUT_DIR)
+    result_path = output_dir / f"{data.task_id}.json"
+
+    if not result_path.exists():
+        return R.error(msg='任务结果不存在', code=404)
+
+    markdown = data.markdown
+    if not markdown.strip():
+        return R.error(msg='文字稿不能为空', code=400)
+
+    try:
+        result_content = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"读取笔记结果失败，无法保存编辑 {result_path}: {e}")
+        return R.error(msg='任务结果读取失败', code=500)
+
+    result_content["markdown"] = markdown
+    result_content["edited_at"] = datetime.now(timezone.utc).isoformat()
+    result_content["mode"] = SUPPORTED_GENERATION_MODE
+
+    try:
+        _write_json_atomic(result_path, result_content)
+        (output_dir / f"{data.task_id}_markdown.md").write_text(markdown, encoding="utf-8")
+    except OSError as e:
+        logger.error(f"保存编辑后的文字稿失败 ({result_path}): {e}")
+        return R.error(msg='保存文字稿失败', code=500)
+
+    return R.success(
+        data={
+            "task_id": data.task_id,
+            "result": result_content,
+        },
+        msg='保存成功',
+    )
 
 
 @router.post("/upload")

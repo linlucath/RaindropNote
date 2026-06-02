@@ -147,5 +147,59 @@ class TestNoteRouter(unittest.TestCase):
         self.assertEqual([task['task_id'] for task in list_response.json()['data']['tasks']], ['task-2'])
 
 
+    def test_update_task_markdown_persists_edited_transcript(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            (output_dir / 'task-edit.json').write_text(
+                json.dumps(
+                    {
+                        'markdown': '# 测试视频\n\n旧内容',
+                        'mode': 'polished_transcript',
+                        'transcript': {'full_text': '旧内容', 'language': 'zh', 'raw': None, 'segments': []},
+                        'audio_meta': {
+                            'video_id': 'BVedit',
+                            'platform': 'bilibili',
+                            'title': '测试视频',
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding='utf-8',
+            )
+
+            original_router_output_dir = note_router.NOTE_OUTPUT_DIR
+            try:
+                note_router.NOTE_OUTPUT_DIR = str(output_dir)
+                client = TestClient(app)
+
+                update_response = client.post(
+                    '/api/update_task_markdown',
+                    json={
+                        'task_id': 'task-edit',
+                        'markdown': '# 测试视频\n\n用户修改后的内容',
+                    },
+                )
+                status_response = client.get('/api/task_status/task-edit')
+                saved_result = json.loads((output_dir / 'task-edit.json').read_text(encoding='utf-8'))
+            finally:
+                note_router.NOTE_OUTPUT_DIR = original_router_output_dir
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()['code'], 0)
+        self.assertEqual(saved_result['markdown'], '# 测试视频\n\n用户修改后的内容')
+        self.assertEqual(saved_result['mode'], 'polished_transcript')
+        self.assertEqual(
+            status_response.json()['data']['result']['markdown'],
+            '# 测试视频\n\n用户修改后的内容',
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

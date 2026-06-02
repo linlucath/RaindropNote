@@ -156,6 +156,16 @@ export const get_task_status = async (task_id: string) => {
   }
 }
 
+export const updateTaskMarkdown = async (data: { task_id: string; markdown: string }) => {
+  return (await request.post('/update_task_markdown', data)) as {
+    task_id: string
+    result: {
+      markdown: string
+      [key: string]: unknown
+    }
+  }
+}
+
 export const get_task_list = async () => {
   try {
     return await request.get('/task_list')
