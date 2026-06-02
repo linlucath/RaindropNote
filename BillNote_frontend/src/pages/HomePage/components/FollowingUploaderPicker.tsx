@@ -36,6 +36,7 @@ export default function FollowingUploaderPicker({
   const [hasMore, setHasMore] = useState(false)
   const [items, setItems] = useState<FollowingUploader[]>([])
   const [error, setError] = useState<string>('')
+  const [failedAvatarMids, setFailedAvatarMids] = useState<Set<string>>(() => new Set())
   const listRef = useRef<HTMLDivElement | null>(null)
   const hydratedInitialDataRef = useRef(false)
   const attemptedInitialLoadRef = useRef(false)
@@ -108,7 +109,6 @@ export default function FollowingUploaderPicker({
       setter(false)
     }
   }
-
 
   const handleLoadMore = async () => {
     await loadFollowings(page + 1, false)
@@ -202,6 +202,7 @@ export default function FollowingUploaderPicker({
           >
             {items.map(item => {
               const selected = item.mid === selectedMid
+              const showAvatar = item.avatar_url && !failedAvatarMids.has(item.mid)
               return (
                 <div
                   key={item.mid}
@@ -218,8 +219,28 @@ export default function FollowingUploaderPicker({
                   }}
                   onKeyDown={event => handleUploaderItemKeyDown(event, item)}
                 >
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-100 text-neutral-400">
-                    <UserRound className="h-4 w-4" />
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-neutral-100 text-neutral-400">
+                    {showAvatar ? (
+                      <img
+                        src={item.avatar_url}
+                        alt={`${item.name}头像`}
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="h-full w-full object-cover"
+                        onError={() => {
+                          setFailedAvatarMids(current => {
+                            if (current.has(item.mid)) {
+                              return current
+                            }
+                            const next = new Set(current)
+                            next.add(item.mid)
+                            return next
+                          })
+                        }}
+                      />
+                    ) : (
+                      <UserRound className="h-4 w-4" />
+                    )}
                   </div>
                   <span className="min-w-0">
                     <span className="flex items-center gap-2">
