@@ -1,14 +1,16 @@
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from app.enmus.task_status_enums import TaskStatus
+from app.services.progress_state import write_task_status
 
 
 NOTE_OUTPUT_DIR = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
 BATCH_OUTPUT_DIR = NOTE_OUTPUT_DIR / "batches"
+CANCELLING_STALE_AFTER_SECONDS = int(os.getenv("TASK_CANCELLING_STALE_AFTER_SECONDS", "3600"))
 ACTIVE_TASK_STATUSES = {
     TaskStatus.PENDING.value,
     TaskStatus.PARSING.value,
@@ -49,9 +51,12 @@ def _parse_iso(value: Optional[str]) -> datetime:
     if not value:
         return datetime.fromtimestamp(0, tz=timezone.utc)
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return datetime.fromtimestamp(0, tz=timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _result_file_for_task(task_id: str) -> Path:
@@ -91,6 +96,25 @@ def _build_task_item(task_id: str, status_payload: dict, result_payload: Optiona
     }
 
 
+def _normalize_stale_cancelling_task(task_id: str, status_payload: dict) -> dict:
+    if status_payload.get("status") != TaskStatus.CANCELLING.value:
+        return status_payload
+
+    updated_at = _parse_iso(status_payload.get("updated_at"))
+    stale_after = timedelta(seconds=CANCELLING_STALE_AFTER_SECONDS)
+    if datetime.now(timezone.utc) - updated_at < stale_after:
+        return status_payload
+
+    return write_task_status(
+        task_id=task_id,
+        output_dir=NOTE_OUTPUT_DIR,
+        status=TaskStatus.CANCELLED,
+        message=status_payload.get("message") or "任务已取消",
+        title=status_payload.get("title"),
+        platform=status_payload.get("platform"),
+    )
+
+
 def _load_tasks() -> list[dict]:
     task_items: dict[str, dict] = {}
     NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -102,6 +126,7 @@ def _load_tasks() -> list[dict]:
         status_payload = _safe_read_json(status_path)
         if not status_payload:
             continue
+        status_payload = _normalize_stale_cancelling_task(task_id, status_payload)
         result_payload = _safe_read_json(_result_file_for_task(task_id))
         task_items[task_id] = _build_task_item(task_id, status_payload, result_payload)
 

@@ -225,6 +225,41 @@ class TestProgressOverview(unittest.TestCase):
 
         self.assertEqual([item["task_id"] for item in payload["tasks"]["active"]], ["real-task"])
 
+    def test_progress_overview_treats_stale_cancelling_task_as_cancelled(self):
+        app = self._make_app()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            note_dir = Path(tmp) / "notes"
+            note_dir.mkdir(parents=True, exist_ok=True)
+            (note_dir / "stale-task.status.json").write_text(
+                json.dumps(
+                    {
+                        "status": TaskStatus.CANCELLING.value,
+                        "message": "",
+                        "created_at": "2000-01-01T00:00:00+00:00",
+                        "updated_at": "2000-01-01T00:00:00+00:00",
+                        "title": "陈旧停止任务",
+                        "platform": "bilibili",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("app.services.progress_query.NOTE_OUTPUT_DIR", note_dir), \
+                    patch("app.services.progress_query.BATCH_OUTPUT_DIR", note_dir / "batches"):
+                client = TestClient(app)
+                response = client.get("/api/progress/overview")
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()["data"]
+
+        self.assertEqual(payload["summary"]["cancelling"], 0)
+        self.assertEqual(payload["summary"]["cancelled"], 1)
+        self.assertEqual(payload["tasks"]["active"], [])
+        self.assertEqual(payload["tasks"]["recent_terminal"][0]["task_id"], "stale-task")
+        self.assertEqual(payload["tasks"]["recent_terminal"][0]["status"], TaskStatus.CANCELLED.value)
+
 
 if __name__ == "__main__":
     unittest.main()
