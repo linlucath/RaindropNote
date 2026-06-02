@@ -22,3 +22,10 @@ test('FollowingUploaderPicker no longer renders remote uploader avatars', () => 
   assert.doesNotMatch(source, /item\.face/)
   assert.doesNotMatch(source, /<img/)
 })
+
+test('FollowingUploaderPicker auto-loads without manual fetch or load-more buttons', () => {
+  assert.doesNotMatch(source, /拉取关注列表/)
+  assert.doesNotMatch(source, />\s*加载更多\s*</)
+  assert.doesNotMatch(source, /handleRefresh/)
+  assert.doesNotMatch(source, /继续向下滚动自动加载/)
+})

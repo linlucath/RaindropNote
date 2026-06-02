@@ -1,8 +1,7 @@
 import { useEffect, useEffectEvent, useMemo, useRef, type KeyboardEvent } from 'react'
-import { AlertCircle, FileText, ListChecks, Loader2, RefreshCw } from 'lucide-react'
+import { AlertCircle, FileText, ListChecks, Loader2 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge.tsx'
-import { Button } from '@/components/ui/button.tsx'
 import {
   getUniqueBatchVideos,
   shouldToggleVideoItemFromKeydown,
@@ -24,11 +23,9 @@ export interface BatchVideoPreviewProps {
   loading?: boolean
   loadingMore?: boolean
   hasMore?: boolean
-  showPreviewButton?: boolean
   emptyMessage?: string
   stale?: boolean
   staleMessage?: string
-  onPreview: () => void
   onLoadMore?: () => void
   onActivateVideo: (video: BatchVideo, statusItem?: BatchStatusItem) => void
 }
@@ -74,11 +71,9 @@ export default function BatchVideoPreview({
   loading = false,
   loadingMore = false,
   hasMore = false,
-  showPreviewButton = true,
-  emptyMessage = '先拉取视频列表',
+  emptyMessage = '暂无视频标题',
   stale = false,
-  staleMessage = '当前列表已过期，请重新拉取',
-  onPreview,
+  staleMessage = '当前列表已过期，请刷新后继续',
   onLoadMore,
   onActivateVideo,
 }: BatchVideoPreviewProps) {
@@ -148,40 +143,13 @@ export default function BatchVideoPreview({
 
   return (
     <div className="space-y-3">
-      {showPreviewButton ? (
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 w-full"
-          disabled={loading}
-          onClick={onPreview}
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-          拉取视频列表
-        </Button>
-      ) : null}
-
       {stale && videos.length > 0 ? (
         <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
-            <div className="font-medium">需要重新拉取</div>
+            <div className="font-medium">需要刷新</div>
             <p className="mt-0.5 text-xs leading-5 text-amber-800">{staleMessage}</p>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-            onClick={onPreview}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            重新拉取
-          </Button>
         </div>
       ) : null}
 
@@ -272,18 +240,10 @@ export default function BatchVideoPreview({
               )
             })}
           </div>
-          {hasMore && onLoadMore ? (
-            <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2">
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                disabled={loadingMore}
-                onClick={onLoadMore}
-              >
-                {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                加载更多
-              </Button>
+          {hasMore && onLoadMore && loadingMore ? (
+            <div className="flex items-center justify-center gap-2 border-t border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>正在加载更多</span>
             </div>
           ) : null}
         </div>
