@@ -11,7 +11,6 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
       uploader_source_mode: 'followings',
       video_url: 'https://space.bilibili.com/123456',
       batch_limit: 20,
-      skip_existing: false,
     },
     preview: {
       videos: [
@@ -44,7 +43,6 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
     uploader_source_mode: 'followings',
     video_url: 'https://space.bilibili.com/123456',
     batch_limit: 20,
-    skip_existing: false,
   })
   assert.equal(persisted.preview.page, 2)
   assert.equal(persisted.preview.offset, 'next-offset')
@@ -62,6 +60,5 @@ test('createDefaultHomePageFormState falls back to the default UI values', () =>
     uploader_source_mode: 'manual',
     video_url: '',
     batch_limit: 0,
-    skip_existing: true,
   })
 })
