@@ -1,6 +1,30 @@
 import re
 from typing import Optional
+from urllib.parse import urlparse
 import requests
+
+
+def infer_platform_from_url(url: str) -> Optional[str]:
+    """
+    根据 http(s) 视频链接推断平台。
+
+    非 http(s) 的本地路径不自动推断，仍由调用方显式传入 platform。
+    """
+    parsed = urlparse(str(url).strip())
+    if parsed.scheme not in ("http", "https"):
+        return None
+
+    host = parsed.netloc.lower()
+    if "youtube.com" in host or "youtu.be" in host:
+        return "youtube"
+    if "bilibili.com" in host or "b23.tv" in host:
+        return "bilibili"
+    if "douyin.com" in host:
+        return "douyin"
+    if "kuaishou.com" in host:
+        return "kuaishou"
+
+    return None
 
 
 def extract_video_id(url: str, platform: str) -> Optional[str]:

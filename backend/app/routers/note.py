@@ -21,7 +21,7 @@ from app.services.progress_query import build_progress_overview
 from app.services.progress_state import read_task_status, request_task_cancel
 from app.services.task_serial_executor import get_task_executor
 from app.utils.response import ResponseWrapper as R
-from app.utils.url_parser import extract_video_id
+from app.utils.url_parser import extract_video_id, infer_platform_from_url
 from app.validators.video_url_validator import is_supported_video_url
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
@@ -59,7 +59,7 @@ class UpdateTaskMarkdownRequest(BaseModel):
 
 class VideoRequest(BaseModel):
     video_url: str
-    platform: str
+    platform: Optional[str] = None
     quality: DownloadQuality
     screenshot: Optional[bool] = False
     link: Optional[bool] = False
@@ -121,10 +121,16 @@ def _resolve_request_platform(data: VideoRequest) -> str:
         _reject_unsupported_platform()
 
     platform = (data.platform or "").strip()
-    if platform in SUPPORT_PLATFORM_MAP:
+    if platform and platform in SUPPORT_PLATFORM_MAP:
         return platform
+    if platform:
+        _reject_unsupported_platform()
 
-    _reject_unsupported_platform()
+    inferred_platform = infer_platform_from_url(data.video_url)
+    if inferred_platform:
+        return inferred_platform
+
+    raise HTTPException(status_code=400, detail="请选择平台")
 
 
 def _is_polished_transcript_result(result_content: dict) -> bool:

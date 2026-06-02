@@ -110,6 +110,25 @@ class TestBilibiliRouter(unittest.TestCase):
         self.assertEqual(payload['data']['items'][0]['author_name'], '作者甲')
         get_video_dynamics.assert_called_once_with(page_size=10, offset='dynamic-0')
 
+    def test_dynamics_marks_processed_videos_with_existing_task_id(self):
+        with patch('app.routers.bilibili.dynamic_service.get_video_dynamics', return_value={
+            'items': [
+                {
+                    'video_id': 'BV1dynamicA',
+                    'video_url': 'https://www.bilibili.com/video/BV1dynamicA',
+                    'title': '已处理动态视频',
+                }
+            ],
+            'offset': '',
+            'page_size': 10,
+            'has_more': False,
+        }), patch('app.routers.batch.find_existing_task_id', return_value='existing-task-1'):
+            response = self.client.get('/api/bilibili/dynamics?page_size=10')
+
+        payload = response.json()
+        self.assertEqual(payload['code'], 0)
+        self.assertEqual(payload['data']['items'][0]['processed_task_id'], 'existing-task-1')
+
 
 if __name__ == '__main__':
     unittest.main()
