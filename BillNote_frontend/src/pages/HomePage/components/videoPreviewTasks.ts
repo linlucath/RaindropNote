@@ -1,6 +1,7 @@
 export interface PreviewVideoLike {
   video_id: string
   video_url: string
+  processed_task_id?: string
 }
 
 export interface PreviewTaskLike {
@@ -15,6 +16,7 @@ export interface PreviewStatusItem {
   video_id: string
   status: string
   task_id: string
+  message?: string
 }
 
 type PreviewVideoAction = 'open' | 'submit'
@@ -29,6 +31,17 @@ export function buildPreviewStatusItems({
   tasks: PreviewTaskLike[]
 }) {
   return videos.flatMap(video => {
+    if (video.processed_task_id) {
+      return [
+        {
+          video_id: video.video_id,
+          status: 'SUCCESS',
+          task_id: video.processed_task_id,
+          message: '已处理',
+        },
+      ]
+    }
+
     const matchedTask = tasks.find(
       task => normalizeVideoUrl(task.formData?.video_url) === normalizeVideoUrl(video.video_url)
     )

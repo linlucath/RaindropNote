@@ -33,11 +33,27 @@ export interface BatchVideoPreviewProps {
 const getVideoTitle = (video: BatchVideo) => video.title?.trim() || video.video_url
 const getVideoMeta = (video: BatchVideo) => formatBatchVideoMeta(video)
 
-const getActionLabel = (statusItem?: BatchStatusItem) => {
-  if (!statusItem) {
-    return '立即处理'
+const getStatusLabel = (statusItem: BatchStatusItem) => {
+  if (statusItem.message) {
+    return statusItem.message
   }
 
+  if (statusItem.status === 'SUCCESS') {
+    return '已处理'
+  }
+
+  if (statusItem.status === 'FAILED') {
+    return '处理失败'
+  }
+
+  if (statusItem.status === 'CANCELLED') {
+    return '已取消'
+  }
+
+  return statusItem.status
+}
+
+const getActionLabel = (statusItem: BatchStatusItem) => {
   if (statusItem.status === 'SUCCESS') {
     return '查看结果'
   }
@@ -193,6 +209,7 @@ export default function BatchVideoPreview({
           >
             {uniqueVideos.map((video, index) => {
               const statusItem = statusByVideoId.get(video.video_id)
+              const statusLabel = statusItem ? getStatusLabel(statusItem) : ''
 
               return (
                 <div
@@ -221,11 +238,11 @@ export default function BatchVideoPreview({
                         <Badge
                           variant="outline"
                           className="h-5 bg-white px-1.5 text-[10px] text-neutral-600"
-                          title={statusItem.message}
+                          title={statusLabel}
                         >
-                          {statusItem.status}
+                          {statusLabel}
                         </Badge>
-                        {statusItem.message ? (
+                        {statusItem.message && statusItem.message !== statusLabel ? (
                           <span className="truncate text-[11px] text-neutral-500">
                             {statusItem.message}
                           </span>
@@ -233,9 +250,11 @@ export default function BatchVideoPreview({
                       </span>
                     ) : null}
                   </span>
-                  <span className="self-center rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-600">
-                    {getActionLabel(statusItem)}
-                  </span>
+                  {statusItem ? (
+                    <span className="self-center rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-600">
+                      {getActionLabel(statusItem)}
+                    </span>
+                  ) : null}
                 </div>
               )
             })}
