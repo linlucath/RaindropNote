@@ -3,11 +3,18 @@ import {
   HardDriveDownload,
   Info,
   Activity,
+  SlidersHorizontal,
 } from 'lucide-react'
 import MenuBar, { IMenuProps } from '@/pages/SettingPage/components/menuBar.tsx'
 
 const Menu = () => {
   const menuList: IMenuProps[] = [
+    {
+      id: 'general',
+      name: '全局配置',
+      icon: <SlidersHorizontal />,
+      path: '/settings/general',
+    },
     {
       id: 'model',
       name: 'AI 模型设置',

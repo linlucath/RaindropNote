@@ -41,7 +41,22 @@ test('NoteForm keeps uploader source mode focused on uploader flows', () => {
   assert.doesNotMatch(source, /uploader_source_mode: z\.enum\(\['manual', 'followings', 'dynamics'\]\)/)
 })
 
-test('NoteForm has dedicated fetch copy for followed dynamics', () => {
-  assert.match(source, /拉取关注动态/)
-  assert.match(source, /从关注动态里选择投稿视频/)
+test('NoteForm renders uploader source mode with the shared select control', () => {
+  const fieldStart = source.indexOf('name="uploader_source_mode"')
+  const nextField = source.indexOf('name="platform"', fieldStart)
+  const uploaderSourceModeField = source.slice(fieldStart, nextField)
+
+  assert.match(uploaderSourceModeField, /<Select[\s\S]*value=\{field\.value\}/)
+  assert.match(uploaderSourceModeField, /<SelectTrigger className="w-full/)
+  assert.match(uploaderSourceModeField, /disabled=\{option\.value === 'followings' && platform !== 'bilibili'\}/)
+  assert.doesNotMatch(uploaderSourceModeField, /grid grid-cols-2/)
+  assert.doesNotMatch(uploaderSourceModeField, /<button/)
+})
+
+test('NoteForm auto-loads followed dynamics without a manual fetch button', () => {
+  assert.match(source, /dynamicsAutoLoadStartedRef/)
+  assert.match(source, /void loadPreviewBatchPage\(true\)/)
+  assert.doesNotMatch(source, />\s*拉取关注动态\s*</)
+  assert.doesNotMatch(source, /先拉取关注动态/)
+  assert.match(source, /关注动态会自动加载/)
 })
