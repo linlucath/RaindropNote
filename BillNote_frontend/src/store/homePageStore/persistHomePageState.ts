@@ -8,7 +8,6 @@ export interface HomePageFormState {
   source_type: HomePageSourceType
   uploader_source_mode: HomePageUploaderSourceMode
   batch_limit: number
-  skip_existing: boolean
   platform: string
 }
 
@@ -41,7 +40,6 @@ export function createDefaultHomePageFormState(): HomePageFormState {
     uploader_source_mode: 'manual',
     video_url: '',
     batch_limit: 0,
-    skip_existing: true,
   }
 }
 

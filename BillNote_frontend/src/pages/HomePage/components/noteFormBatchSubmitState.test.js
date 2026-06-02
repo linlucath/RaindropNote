@@ -12,6 +12,8 @@ test('NoteForm keeps batch mode free of explanatory direct-row helper copy', () 
   assert.doesNotMatch(source, /点击列表中的视频即可立即开始处理/)
   assert.doesNotMatch(source, /请直接点击上方视频开始处理/)
   assert.doesNotMatch(source, /开始批量处理/)
+  assert.doesNotMatch(source, /跳过已处理/)
+  assert.doesNotMatch(source, /name="skip_existing"/)
 })
 
 test('NoteForm only blocks single submit when the current form still targets the same generating task', () => {
