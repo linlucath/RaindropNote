@@ -15,6 +15,7 @@ from app.db.video_task_dao import get_task_by_video
 from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
+from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.note import NoteGenerator, logger
 from app.services.progress_query import build_progress_overview
 from app.services.progress_state import read_task_status, request_task_cancel
@@ -105,6 +106,25 @@ def _normalize_generation_mode(mode: Optional[str]) -> str:
     if normalized != SUPPORTED_GENERATION_MODE:
         raise HTTPException(status_code=400, detail="当前仅支持校对文字稿模式")
     return normalized
+
+
+def _reject_unsupported_platform() -> None:
+    raise HTTPException(
+        status_code=400,
+        detail=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message,
+    )
+
+
+def _resolve_request_platform(data: VideoRequest) -> str:
+    parsed = urlparse(str(data.video_url))
+    if parsed.scheme not in ("http", "https"):
+        _reject_unsupported_platform()
+
+    platform = (data.platform or "").strip()
+    if platform in SUPPORT_PLATFORM_MAP:
+        return platform
+
+    _reject_unsupported_platform()
 
 
 def _is_polished_transcript_result(result_content: dict) -> bool:
@@ -345,8 +365,9 @@ async def upload(file: UploadFile = File(...)):
 @router.post("/generate_note")
 def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
     try:
+        platform = _resolve_request_platform(data)
 
-        video_id = extract_video_id(data.video_url, data.platform)
+        video_id = extract_video_id(data.video_url, platform)
         # if not video_id:
         #     raise HTTPException(status_code=400, detail="无法提取视频 ID")
         # existing = get_task_by_video(video_id, data.platform)
@@ -369,11 +390,13 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
         # 统一先写入 PENDING，表示已进入队列等待串行执行
         NoteGenerator._update_status(task_id, TaskStatus.PENDING)
 
-        background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
+        background_tasks.add_task(run_note_task, task_id, data.video_url, platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
                                   data.extras, data.video_understanding, data.video_interval, data.grid_size,
                                   _normalize_generation_mode(data.mode))
         return R.success({"task_id": task_id})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

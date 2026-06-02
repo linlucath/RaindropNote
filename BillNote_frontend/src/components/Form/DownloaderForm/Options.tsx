@@ -7,17 +7,14 @@ const Provider = () => {
       <div className="text-sm font-light">下载器配置</div>
       <div>
         {videoPlatforms &&
-          videoPlatforms.map((provider, index) => {
-            if (provider.value !== 'local')
-              return (
-                <ProviderCard
-                  key={index}
-                  providerName={provider.label}
-                  Icon={provider?.logo}
-                  id={provider.value}
-                />
-              )
-          })}
+          videoPlatforms.map((provider, index) => (
+            <ProviderCard
+              key={index}
+              providerName={provider.label}
+              Icon={provider?.logo}
+              id={provider.value}
+            />
+          ))}
       </div>
     </div>
   )

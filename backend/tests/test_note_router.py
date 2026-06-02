@@ -200,6 +200,33 @@ class TestNoteRouter(unittest.TestCase):
             '# 测试视频\n\n用户修改后的内容',
         )
 
+    def test_generate_note_rejects_explicit_local_platform(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = FastAPI(lifespan=lifespan)
+        app.include_router(note_router.router, prefix='/api')
+
+        with patch("app.routers.note.NoteGenerator._update_status") as update_status, patch(
+            "app.routers.note.run_note_task"
+        ) as run_task:
+            client = TestClient(app)
+            response = client.post(
+                '/api/generate_note',
+                json={
+                    'video_url': '/uploads/local.mp4',
+                    'platform': 'local',
+                    'quality': 'fast',
+                    'model_name': 'demo-model',
+                    'provider_id': 'demo-provider',
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        update_status.assert_not_called()
+        run_task.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

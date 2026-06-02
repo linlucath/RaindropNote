@@ -78,7 +78,7 @@ export default function AboutPage() {
           <h2 className="mb-8 text-center text-3xl font-bold">🔧 功能特性</h2>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {[
-              { title: '多平台支持', desc: '支持 Bilibili、YouTube、本地视频、抖音等多个平台' },
+              { title: '多平台支持', desc: '支持 Bilibili、YouTube、抖音、快手等多个平台' },
               { title: '校对文字稿', desc: '默认生成经过大模型校对的 Markdown 文字稿' },
               { title: '自定义 GPT 配置', desc: '支持自行配置 GPT 大模型' },
               { title: '本地音频转写', desc: '支持 Fast-Whisper 等本地模型音频转写' },
