@@ -691,10 +691,10 @@ const NoteForm = () => {
 
   const getPreviewRefreshErrorMessage = (values: NoteFormValues) =>
     values.source_type === 'dynamics'
-      ? '关注动态已变更，请先重新拉取视频列表'
+      ? '关注动态已变更，请等待列表刷新后再继续'
       : values.uploader_source_mode === 'followings'
-        ? '已选择的 UP 主已变更，请先重新拉取视频列表'
-        : 'UP 主链接已变更，请先重新拉取视频列表'
+        ? '已选择的 UP 主已变更，请等待列表刷新后再继续'
+        : 'UP 主链接已变更，请先刷新视频列表'
 
   const focusTask = (taskId: string) => {
     setCurrentTask(taskId)
@@ -1151,7 +1151,6 @@ const NoteForm = () => {
                   loading={batchLoading}
                   loadingMore={previewLoadingMore}
                   hasMore={previewHasMore}
-                  showPreviewButton={false}
                   emptyMessage={
                     dynamicsMode
                       ? '暂无动态投稿'
@@ -1167,7 +1166,6 @@ const NoteForm = () => {
                         ? '所选 UP 主已变更。'
                         : 'UP 主链接已变更。'
                   }
-                  onPreview={handlePreviewBatch}
                   onLoadMore={() => void loadPreviewBatchPage(false)}
                   onActivateVideo={video => {
                     void handlePreviewVideoActivate(video)

@@ -1,8 +1,7 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { AlertCircle, Loader2, RefreshCw, UserRound } from 'lucide-react'
+import { AlertCircle, Loader2, UserRound } from 'lucide-react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
-import { Button } from '@/components/ui/button.tsx'
 import { getDownloaderCookie } from '@/services/downloader.ts'
 import {
   FollowingUploader,
@@ -103,16 +102,13 @@ export default function FollowingUploaderPicker({
       const message =
         (typeof loadError === 'object' && loadError !== null && 'msg' in loadError
           ? (loadError as RequestError).msg
-          : '') || '拉取关注列表失败，请稍后重试'
+          : '') || '获取关注列表失败，请稍后重试'
       setError(message)
     } finally {
       setter(false)
     }
   }
 
-  const handleRefresh = async () => {
-    await loadFollowings(1, true)
-  }
 
   const handleLoadMore = async () => {
     await loadFollowings(page + 1, false)
@@ -179,23 +175,6 @@ export default function FollowingUploaderPicker({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 px-3"
-          disabled={showInitialLoading || configured === false}
-          onClick={() => void handleRefresh()}
-        >
-          {showInitialLoading ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-2 h-4 w-4" />
-          )}
-          拉取关注列表
-        </Button>
-      </div>
-
       {configured === false ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
@@ -259,18 +238,10 @@ export default function FollowingUploaderPicker({
               )
             })}
           </div>
-          {hasMore ? (
-            <div className="border-t border-neutral-200 bg-neutral-50 px-3 py-2">
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                disabled={loadingMore}
-                onClick={() => void handleLoadMore()}
-              >
-                {loadingMore ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                加载更多
-              </Button>
+          {hasMore && loadingMore ? (
+            <div className="flex items-center justify-center gap-2 border-t border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>正在加载更多</span>
             </div>
           ) : null}
         </div>

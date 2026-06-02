@@ -22,3 +22,8 @@ test('BatchVideoPreview does not show video count badges in the selection sectio
   assert.doesNotMatch(source, /共\s*\{uniqueVideos\.length\}\s*条/)
   assert.doesNotMatch(source, /已去重\s*\{uniqueVideos\.length\}\s*条/)
 })
+
+test('BatchVideoPreview relies on scroll loading instead of a load-more button', () => {
+  assert.doesNotMatch(source, />\s*加载更多\s*</)
+  assert.doesNotMatch(source, /继续向下滚动自动加载/)
+})
