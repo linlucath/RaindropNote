@@ -58,5 +58,13 @@ test('NoteForm auto-loads followed dynamics without a manual fetch button', () =
   assert.match(source, /void loadPreviewBatchPage\(true\)/)
   assert.doesNotMatch(source, />\s*拉取关注动态\s*</)
   assert.doesNotMatch(source, /先拉取关注动态/)
-  assert.match(source, /关注动态会自动加载/)
+})
+
+test('NoteForm omits explanatory helper copy from dynamic and following sources', () => {
+  assert.doesNotMatch(source, /关注动态会自动加载/)
+  assert.doesNotMatch(source, /从列表里选择投稿视频后立即开始转写/)
+  assert.doesNotMatch(source, /点击后会自动加载该 UP 主的视频列表/)
+  assert.doesNotMatch(source, /视频列表会自动加载/)
+  assert.doesNotMatch(source, /当前列表已锁定/)
+  assert.doesNotMatch(source, /点击视频即可立即开始处理文字稿/)
 })

@@ -24,6 +24,16 @@ test('MarkdownViewer no longer references chat or mind map panels', () => {
   assert.doesNotMatch(markdownViewerSource, /导出思维导图/)
 })
 
+test('MarkdownViewer keeps empty and loading states free of explanatory helper copy', () => {
+  assert.doesNotMatch(markdownViewerSource, /输入视频链接并点击/)
+  assert.doesNotMatch(markdownViewerSource, /生成文字稿"按钮/)
+  assert.doesNotMatch(markdownViewerSource, /支持哔哩哔哩/)
+  assert.doesNotMatch(markdownViewerSource, /这可能需要几秒钟时间/)
+  assert.doesNotMatch(markdownViewerSource, /取决于视频长度/)
+  assert.doesNotMatch(markdownViewerSource, /这个任务已经停止/)
+  assert.doesNotMatch(markdownViewerSource, /请检查后台或稍后再试/)
+})
+
 test('chat and markmap implementation files are removed', () => {
   assert.equal(existsSync(path.join(__dirname, 'ChatPanel.tsx')), false)
   assert.equal(existsSync(path.join(__dirname, 'MarkmapComponent.tsx')), false)

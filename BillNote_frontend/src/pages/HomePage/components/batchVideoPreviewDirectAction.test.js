@@ -12,6 +12,7 @@ test('BatchVideoPreview exposes direct action copy instead of checkbox selection
   assert.match(source, /立即处理/)
   assert.match(source, /查看结果/)
   assert.match(source, /重新处理/)
+  assert.doesNotMatch(source, /点击视频即可开始处理/)
   assert.doesNotMatch(source, /Checkbox/)
   assert.doesNotMatch(source, /全选/)
   assert.doesNotMatch(source, /全不选/)

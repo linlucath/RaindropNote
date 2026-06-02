@@ -220,7 +220,6 @@ export default function BatchVideoPreview({
                 {completedCount > 0 ? <span>已有 {completedCount} 条结果可查看</span> : null}
               </div>
             </div>
-            <span className="text-xs text-neutral-500">点击视频即可开始处理</span>
           </div>
 
           <div

@@ -778,7 +778,6 @@ const NoteForm = () => {
     })
 
     if (batchMode) {
-      toast.error('请直接点击上方视频开始处理')
       return
     }
 
@@ -813,11 +812,7 @@ const NoteForm = () => {
     const label = sameTaskGenerating ? '当前文字稿生成中' : editing ? '重新生成' : '生成文字稿'
 
     if (batchMode) {
-      return (
-        <div className="rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          点击列表中的视频即可立即开始处理
-        </div>
-      )
+      return null
     }
 
     return (
@@ -1081,22 +1076,18 @@ const NoteForm = () => {
                       <span>已选择 UP 主</span>
                       <span className="font-medium text-neutral-900">{selectedUploader.name}</span>
                       <span className="text-neutral-400">UID {selectedUploader.mid}</span>
-                      <span className="text-sky-700">点击后会自动加载该 UP 主的视频列表</span>
                     </div>
                   ) : null}
                 </div>
               ) : null}
 
-              {dynamicsMode ? (
+              {dynamicsMode && batchLoading ? (
                 <div className="space-y-3 rounded-md border border-neutral-200 bg-neutral-50/60 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-3 text-sm text-neutral-600">
-                    <span>关注动态会自动加载，从列表里选择投稿视频后立即开始转写。</span>
-                    {batchLoading ? (
-                      <span className="inline-flex items-center gap-2 text-xs text-sky-700">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        正在加载
-                      </span>
-                    ) : null}
+                    <span className="inline-flex items-center gap-2 text-xs text-sky-700">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      正在加载
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -1152,7 +1143,7 @@ const NoteForm = () => {
           </WorkspaceSection>
 
           {batchMode && (
-            <WorkspaceSection title="2. 选择视频" tip="点击视频即可立即开始处理文字稿">
+            <WorkspaceSection title="2. 选择视频">
               <div className="space-y-3">
                 <BatchVideoPreview
                   videos={previewVideos}
@@ -1163,18 +1154,18 @@ const NoteForm = () => {
                   showPreviewButton={false}
                   emptyMessage={
                     dynamicsMode
-                      ? '关注动态会自动加载，稍候选择要处理的视频'
+                      ? '暂无动态投稿'
                       : uploaderSourceMode === 'followings'
-                        ? '先从关注列表选择一个 UP 主，视频列表会自动加载'
-                        : '粘贴 UP 主主页后拉取视频标题'
+                        ? '请选择 UP 主'
+                        : '暂无视频标题'
                   }
                   stale={previewDirty}
                   staleMessage={
                     dynamicsMode
-                      ? '关注动态条件已变更，当前标题列表不再对应最新条件。'
+                      ? '关注动态条件已变更。'
                       : uploaderSourceMode === 'followings'
-                        ? '你修改了所选 UP 主，当前标题列表不再对应最新条件。'
-                        : '你修改了 UP 主链接，当前标题列表不再对应最新条件。'
+                        ? '所选 UP 主已变更。'
+                        : 'UP 主链接已变更。'
                   }
                   onPreview={handlePreviewBatch}
                   onLoadMore={() => void loadPreviewBatchPage(false)}
@@ -1183,15 +1174,6 @@ const NoteForm = () => {
                   }}
                 />
 
-                {previewVideos.length > 0 && !previewDirty && (
-                  <div className="text-xs text-neutral-500">
-                    {dynamicsMode
-                      ? '当前列表已锁定到这次拉取结果。条件变化后，需要重新拉取再点击视频。'
-                      : `当前列表已锁定到这次拉取结果。修改${
-                          uploaderSourceMode === 'followings' ? '所选 UP 主' : '链接'
-                        }后，需要重新拉取再点击视频。`}
-                  </div>
-                )}
               </div>
             </WorkspaceSection>
           )}
