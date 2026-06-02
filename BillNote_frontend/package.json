@@ -8,8 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "smoke": "playwright test",
-    "smoke:batch-selection": "playwright test tests/smoke/batch-selection.spec.ts"
+    "smoke": "playwright test"
   },
   "dependencies": {
     "@ant-design/x": "^2.4.0",
