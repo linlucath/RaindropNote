@@ -21,3 +21,9 @@ test('NoteHistory no longer renders cover thumbnails', () => {
   assert.doesNotMatch(noteHistorySource, /LazyImage/)
   assert.doesNotMatch(noteHistorySource, /placeholder\.png/)
 })
+
+test('NoteHistory no longer renders repetitive transcript and completed badges', () => {
+  assert.doesNotMatch(noteHistorySource, /formData\?\.mode/)
+  assert.doesNotMatch(noteHistorySource, /polished_transcript/)
+  assert.doesNotMatch(noteHistorySource, /已完成/)
+})
