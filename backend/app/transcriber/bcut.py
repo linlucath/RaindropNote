@@ -1,13 +1,18 @@
-import json
 import logging
-import time
-from typing import Optional, List, Dict, Union
+from typing import Optional, List
 
 import requests
 
 from app.decorators.timeit import timeit
-from app.models.transcriber_model import TranscriptSegment, TranscriptResult
+from app.models.transcriber_model import TranscriptResult
 from app.transcriber.base import Transcriber
+from app.transcriber.bcut_payloads import (
+    build_commit_upload_payload,
+    build_create_upload_payload,
+    iter_upload_clip_ranges,
+)
+from app.transcriber.bcut_result_parser import parse_task_result
+from app.transcriber.bcut_task_polling import wait_for_completed_task_result
 from app.utils.logger import get_logger
 from events import transcription_finished
 
@@ -63,13 +68,7 @@ class BcutTranscriber(Transcriber):
         if not file_binary:
             raise ValueError("无法读取文件数据")
             
-        payload = json.dumps({
-            "type": 2,
-            "name": "audio.mp3",
-            "size": len(file_binary),
-            "ResourceFileType": "mp3",
-            "model_id": "8",
-        })
+        payload = build_create_upload_payload(len(file_binary))
 
         resp = self.session.post(
             API_REQ_UPLOAD,
@@ -88,16 +87,16 @@ class BcutTranscriber(Transcriber):
         self.__clips = len(resp_data["upload_urls"])
 
         logger.info(
-            f"申请上传成功, 总计大小{resp_data['size'] // 1024}KB, {self.__clips}分片, 分片大小{resp_data['per_size'] // 1024}KB: {self.__in_boss_key}"
+            f"申请上传成功, 总计大小{resp_data['size'] // 1024}KB, {self.__clips}分片, 分片大小{resp_data['per_size'] // 1024}KB"
         )
         self.__upload_part(file_binary)
         self.__commit_upload()
 
     def __upload_part(self, file_binary: bytes) -> None:
         """上传音频数据"""
-        for clip in range(self.__clips):
-            start_range = clip * self.__per_size
-            end_range = min((clip + 1) * self.__per_size, len(file_binary))
+        for clip, (start_range, end_range) in enumerate(
+            iter_upload_clip_ranges(len(file_binary), self.__per_size, self.__clips)
+        ):
             logger.info(f"开始上传分片{clip}: {start_range}-{end_range}")
             resp = self.session.put(
                 self.__upload_urls[clip],
@@ -107,17 +106,16 @@ class BcutTranscriber(Transcriber):
             resp.raise_for_status()
             etag = resp.headers.get("Etag", "").strip('"')
             self.__etags.append(etag)
-            logger.info(f"分片{clip}上传成功: {etag}")
+            logger.info(f"分片{clip}上传成功")
 
     def __commit_upload(self) -> None:
         """提交上传数据"""
-        data = json.dumps({
-            "InBossKey": self.__in_boss_key,
-            "ResourceId": self.__resource_id,
-            "Etags": ",".join(self.__etags),
-            "UploadId": self.__upload_id,
-            "model_id": "8",
-        })
+        data = build_commit_upload_payload(
+            in_boss_key=self.__in_boss_key,
+            resource_id=self.__resource_id,
+            etags=self.__etags,
+            upload_id=self.__upload_id,
+        )
         resp = self.session.post(
             API_COMMIT_UPLOAD,
             data=data,
@@ -125,14 +123,14 @@ class BcutTranscriber(Transcriber):
         )
         resp.raise_for_status()
         resp = resp.json()
-        print('Bili',resp)
+        logger.debug("Bcut commit upload response code: %s", resp.get("code"))
         if resp.get("code") != 0:
             error_msg = f"上传提交失败: {resp.get('message', '未知错误')}"
             logger.error(error_msg)
             raise Exception(error_msg)
             
         self.__download_url = resp["data"]["download_url"]
-        logger.info(f"提交成功，下载链接: {self.__download_url}")
+        logger.info("提交成功，已获取下载链接")
 
     def _create_task(self) -> str:
         """开始创建转换任务"""
@@ -147,7 +145,7 @@ class BcutTranscriber(Transcriber):
             raise Exception(error_msg)
             
         self.task_id = resp["data"]["task_id"]
-        logger.info(f"任务已创建: {self.task_id}")
+        logger.info("任务已创建")
         return self.task_id
 
     def _query_result(self) -> dict:
@@ -170,7 +168,7 @@ class BcutTranscriber(Transcriber):
     def transcript(self, file_path: str) -> TranscriptResult:
         """执行识别过程，符合 Transcriber 接口"""
         try:
-            logger.info(f"开始处理文件: {file_path}")
+            logger.info("开始处理文件")
             
             # 上传文件
             logger.info("正在上传文件...")
@@ -182,57 +180,10 @@ class BcutTranscriber(Transcriber):
             
             # 轮询检查任务状态
             logger.info("等待转录结果...")
-            task_resp = None
-            max_retries = 500
-            for i in range(max_retries):
-                task_resp = self._query_result()
+            task_resp = wait_for_completed_task_result(self._query_result, logger=logger)
                 
-                if task_resp["state"] == 4:  # 完成状态
-                    break
-                elif task_resp["state"] == 3:  # 失败状态
-                    error_msg = f"B站ASR任务失败，状态码: {task_resp['state']}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg)
-                    
-                # 每隔一段时间打印进度
-                if i % 10 == 0:
-                    logger.info(f"转录进行中... {i}/{max_retries}")
-                    
-                time.sleep(1)
-                
-            if not task_resp or task_resp["state"] != 4:
-                error_msg = f"B站ASR任务未能完成，状态: {task_resp.get('state') if task_resp else 'Unknown'}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-                
-            # 解析结果
             logger.info("转录成功，处理结果...")
-            result_json = json.loads(task_resp["result"])
-            
-            # 提取分段数据
-            segments = []
-            full_text = ""
-            
-            for u in result_json.get("utterances", []):
-                text = u.get("transcript", "").strip()
-                # B站ASR返回的时间戳是毫秒，需要转换为秒
-                start_time = float(u.get("start_time", 0)) / 1000.0
-                end_time = float(u.get("end_time", 0)) / 1000.0
-                
-                full_text += text + " "
-                segments.append(TranscriptSegment(
-                    start=start_time,
-                    end=end_time,
-                    text=text
-                ))
-            
-            # 创建结果对象
-            result = TranscriptResult(
-                language=result_json.get("language", "zh"),
-                full_text=full_text.strip(),
-                segments=segments,
-                raw=result_json
-            )
+            result = parse_task_result(task_resp["result"])
             
             # 触发完成事件
             # self.on_finish(file_path, result)
@@ -240,12 +191,12 @@ class BcutTranscriber(Transcriber):
             return result
             
         except Exception as e:
-            logger.error(f"B站ASR处理失败: {str(e)}")
+            logger.error("B站ASR处理失败")
             raise
 
     def on_finish(self, video_path: str, result: TranscriptResult) -> None:
         """转录完成的回调"""
-        logger.info(f"B站ASR转写完成: {video_path}")
+        logger.info("B站ASR转写完成")
         transcription_finished.send({
             "file_path": video_path,
         })

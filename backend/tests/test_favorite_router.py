@@ -167,6 +167,48 @@ class TestFavoriteRouter(unittest.TestCase):
         self.assertEqual(list_response.json()["data"]["favorites"], [])
         self.assertIsNone(by_task_response.json()["data"]["favorite"])
 
+    def test_create_favorite_uses_legacy_load_task_result_patch(self):
+        app = self._build_app()
+
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        Base.metadata.create_all(bind=engine)
+
+        def override_get_db():
+            db = testing_session_local()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        legacy_task_result = {
+            "markdown": "# Legacy Favorite",
+            "transcript": {"full_text": "legacy"},
+            "audio_meta": {
+                "title": "Legacy Favorite",
+                "video_id": "legacy-video",
+                "platform": "bilibili",
+            },
+        }
+
+        with patch("app.db.favorite_dao.get_db", new=override_get_db), patch(
+            "app.routers.favorite._load_task_result",
+            return_value=legacy_task_result,
+        ) as load_task_result:
+            client = TestClient(app)
+            response = client.post("/api/favorites", json={"task_id": "legacy-task"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["code"], 0)
+        favorite = response.json()["data"]["favorite"]
+        self.assertEqual(favorite["title"], "Legacy Favorite")
+        self.assertEqual(favorite["video_id"], "legacy-video")
+        load_task_result.assert_called_once_with("legacy-task")
+
 
 if __name__ == "__main__":
     unittest.main()

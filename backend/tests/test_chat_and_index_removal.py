@@ -30,7 +30,9 @@ class TestChatAndIndexRemoval(unittest.TestCase):
                 video_url="https://www.bilibili.com/video/BV123",
                 platform="bilibili",
                 quality=DownloadQuality.fast,
-                mode="transcript",
+                mode="polished_transcript",
+                model_name="demo-model",
+                provider_id="demo-provider",
             )
 
 

@@ -111,6 +111,33 @@ def _build_youtube_channel_page_html(*, videos: list[dict], continuation_token: 
 
 
 class TestBatchRouter(unittest.TestCase):
+    def test_old_private_batch_preview_helpers_remain_importable_on_router(self):
+        helper_names = [
+            "_normalize_youtube_channel_url",
+            "_build_youtube_popular_videos_url",
+            "_build_youtube_uploads_playlist_url",
+            "_apply_default_bilibili_space_order",
+            "_parse_bilibili_space_video_request",
+            "_youtube_request_headers",
+            "_extract_youtube_page_initial_data",
+            "_parse_youtube_view_count",
+            "_extract_youtube_lockup_video",
+            "_extract_youtube_videos_from_rich_grid_contents",
+            "_extract_youtube_rich_grid_continuation_token",
+            "_extract_youtube_page_rich_grid",
+            "_extract_youtube_popular_chip_token",
+            "_extract_youtube_continuation_rich_grid",
+            "_request_youtube_browse_continuation",
+            "_preview_youtube_popular_channel_page",
+            "_page_fetch_window",
+            "_preview_youtube_fallback_page",
+            "_preview_bilibili_flat_page",
+        ]
+
+        missing_helpers = [name for name in helper_names if not callable(getattr(batch, name, None))]
+
+        self.assertEqual(missing_helpers, [])
+
     def test_task_status_description_includes_cancelling_and_cancelled(self):
         self.assertEqual(TaskStatus.description(TaskStatus.CANCELLING), "正在停止")
         self.assertEqual(TaskStatus.description(TaskStatus.CANCELLED), "已取消")
@@ -831,6 +858,14 @@ class TestBatchRouter(unittest.TestCase):
 
         self.assertNotIn("playlistend", captured_options)
 
+    def test_apply_bilibili_cookie_uses_router_cookie_file_path_patch(self):
+        with patch("app.routers.batch._cookie_manager.get", return_value=""), \
+                patch("app.routers.batch._cookie_file_path", return_value=Path("/tmp/router-cookies.txt")), \
+                patch("pathlib.Path.exists", return_value=True):
+            options = batch._apply_bilibili_cookie({"http_headers": {}})
+
+        self.assertEqual(options["cookiefile"], "/tmp/router-cookies.txt")
+
     def test_apply_bilibili_cookie_prefers_env_cookie_over_cookiefile(self):
         with patch("app.routers.batch._cookie_file_path", return_value=Path("/tmp/existing-cookies.txt")), \
                 patch("pathlib.Path.exists", return_value=True), \
@@ -841,6 +876,132 @@ class TestBatchRouter(unittest.TestCase):
 
         self.assertNotIn("cookiefile", options)
         self.assertEqual(options["http_headers"]["Cookie"], "SESSDATA=test-cookie")
+
+    def test_youtube_popular_preview_uses_router_parser_patch(self):
+        class FakeResponse:
+            text = _build_youtube_channel_page_html(
+                videos=[{"video_id": "yt-runtime1", "title": "Runtime 1", "view_text": "1,000 views"}],
+                continuation_token=None,
+            )
+
+            def raise_for_status(self):
+                return None
+
+        with patch("app.routers.batch.requests.get", return_value=FakeResponse()), patch(
+            "app.routers.batch._extract_youtube_page_initial_data",
+            side_effect=ValueError("router parser patch"),
+        ):
+            with self.assertRaisesRegex(ValueError, "router parser patch"):
+                batch._preview_youtube_popular_channel_page(
+                    "https://www.youtube.com/@demo/videos",
+                    page=1,
+                    page_size=1,
+                    limit=1,
+                )
+
+    def test_preview_patchables_do_not_leak_into_service_module_after_router_call(self):
+        from app.services import batch_preview as batch_preview_service
+
+        original_extract_flat_playlist = batch_preview_service._extract_flat_playlist
+        self.addCleanup(
+            setattr,
+            batch_preview_service,
+            "_extract_flat_playlist",
+            original_extract_flat_playlist,
+        )
+
+        with patch("app.routers.batch._extract_flat_playlist", return_value={
+            "entries": [{"id": "BV1", "title": "视频1"}],
+        }):
+            videos = batch.preview_bilibili_space("https://example.com/videos", limit=1)
+
+        self.assertEqual([video["video_id"] for video in videos], ["BV1"])
+        self.assertIs(batch_preview_service._extract_flat_playlist, original_extract_flat_playlist)
+
+    def test_preview_normalizer_router_patch_is_forwarded_to_service_call(self):
+        normalized_video = {
+            "video_id": "patched-video",
+            "video_url": "https://example.com/patched-video",
+            "title": "Patched title",
+            "platform": "bilibili",
+        }
+
+        with patch("app.routers.batch._extract_flat_playlist", return_value={
+            "entries": [{"id": "not-a-bv"}],
+        }), patch(
+            "app.routers.batch.normalize_bilibili_entries",
+            return_value=[normalized_video],
+        ):
+            videos = batch.preview_bilibili_space("https://example.com/videos", limit=1)
+
+        self.assertEqual(videos, [normalized_video])
+
+    def test_batch_state_patchables_do_not_leak_into_service_module_after_router_call(self):
+        from app.services import batch_state as batch_state_service
+
+        original_output_dir = batch_state_service.BATCH_OUTPUT_DIR
+        original_batches = batch_state_service._batches
+        original_lock = batch_state_service._batch_lock
+        self.addCleanup(setattr, batch_state_service, "BATCH_OUTPUT_DIR", original_output_dir)
+        self.addCleanup(setattr, batch_state_service, "_batches", original_batches)
+        self.addCleanup(setattr, batch_state_service, "_batch_lock", original_lock)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            patched_output_dir = Path(tmp) / "batches"
+            with patch("app.routers.batch.BATCH_OUTPUT_DIR", patched_output_dir):
+                batch._save_batch({"batch_id": "batch-leak-check"})
+
+            self.assertTrue((patched_output_dir / "batch-leak-check.json").exists())
+
+        self.assertEqual(batch_state_service.BATCH_OUTPUT_DIR, original_output_dir)
+        self.assertIs(batch_state_service._batches, original_batches)
+        self.assertIs(batch_state_service._batch_lock, original_lock)
+
+    def test_batch_state_router_wrapper_passes_patchables_without_mutating_service_globals(self):
+        from app.services import batch_state as batch_state_service
+
+        original_update_batch = batch_state_service.update_batch
+        original_output_dir = batch_state_service.BATCH_OUTPUT_DIR
+        batch_id = "batch-explicit-deps"
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.dict("app.routers.batch._batches", {
+                    batch_id: {
+                        "batch_id": batch_id,
+                        "status": "PENDING",
+                        "total": 1,
+                        "completed": 0,
+                        "items": [{"status": "PENDING"}],
+                    },
+                }, clear=True), \
+                patch("app.routers.batch.BATCH_OUTPUT_DIR", Path(tmp) / "batches"):
+
+            def update_batch_without_global_mutation(*args, **kwargs):
+                self.assertEqual(batch_state_service.BATCH_OUTPUT_DIR, original_output_dir)
+                self.assertEqual(kwargs["output_dir"], Path(tmp) / "batches")
+                return original_update_batch(*args, **kwargs)
+
+            with patch(
+                "app.services.batch_state.update_batch",
+                side_effect=update_batch_without_global_mutation,
+            ):
+                updated = batch._update_batch(batch_id, status="RUNNING")
+
+        self.assertEqual(updated["status"], "RUNNING")
+
+    def test_create_batch_payload_uses_router_platform_inference_patch(self):
+        request = batch.BatchStartRequest(videos=[
+            batch.BatchVideo(
+                video_id="custom-1",
+                video_url="https://example.com/watch/custom-1",
+                title="自定义平台视频",
+            )
+        ])
+
+        with patch("app.routers.batch._infer_platform_from_url", return_value="custom-platform"):
+            payload = batch.create_batch_payload(batch_id="batch-custom", request=request)
+
+        self.assertEqual(payload["items"][0]["platform"], "custom-platform")
 
     def test_find_existing_task_by_video_id(self):
         with tempfile.TemporaryDirectory() as tmp:

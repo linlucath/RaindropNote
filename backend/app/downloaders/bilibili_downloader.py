@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 from abc import ABC
 from typing import Union, Optional, List
@@ -7,9 +6,25 @@ from pathlib import Path
 
 import yt_dlp
 
-from app.downloaders.base import Downloader, DownloadQuality, QUALITY_MAP
+from app.downloaders.base import Downloader, DownloadQuality
+from app.downloaders.bilibili_subtitle_resolver import (
+    build_bilibili_subtitle_file,
+    choose_bilibili_subtitle,
+    parse_bilibili_json3_subtitle_file,
+    parse_bilibili_srt_content,
+)
+from app.downloaders.bilibili_ytdlp_options import (
+    DEFAULT_SUBTITLE_LANGS,
+    build_audio_ydl_opts,
+    build_subtitle_ydl_opts,
+    build_video_ydl_opts,
+)
 from app.models.notes_model import AudioDownloadResult
-from app.models.transcriber_model import TranscriptResult, TranscriptSegment
+from app.models.transcriber_model import TranscriptResult
+from app.services.bilibili_request import (
+    apply_bilibili_ydl_defaults,
+    resolve_bilibili_cookies_path,
+)
 from app.services.cookie_manager import CookieConfigManager
 from app.utils.path_helper import get_data_dir
 from app.utils.url_parser import extract_video_id
@@ -22,40 +37,16 @@ cookie_manager = CookieConfigManager()
 
 
 def _bilibili_cookies_path() -> Path:
-    cookies_path = Path(BILIBILI_COOKIES_FILE)
-    if not cookies_path.is_absolute():
-        cookies_path = Path(__file__).parent.parent.parent / BILIBILI_COOKIES_FILE
-    return cookies_path
+    return resolve_bilibili_cookies_path(BILIBILI_COOKIES_FILE)
 
 
 def _apply_bilibili_ydl_defaults(ydl_opts: dict) -> dict:
-    ydl_opts.setdefault('nocheckcertificate', True)
-    ydl_opts.setdefault('http_headers', {
-        'User-Agent': (
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/120.0.0.0 Safari/537.36'
-        ),
-        'Referer': 'https://www.bilibili.com/',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    })
-
-    cookies_path = _bilibili_cookies_path()
-    if cookies_path.exists():
-        ydl_opts['cookiefile'] = str(cookies_path)
-        logger.info(f"使用 cookies 文件: {cookies_path}")
-    else:
-        raw_cookie = (cookie_manager.get('bilibili') or '').strip()
-        if raw_cookie:
-            ydl_opts['http_headers'] = {
-                **ydl_opts.get('http_headers', {}),
-                'Cookie': raw_cookie,
-            }
-            logger.info('使用配置中的 B站 Cookie')
-        else:
-            logger.warning(f"B站 cookies 文件不存在: {cookies_path}，且未配置 B站 Cookie，下载可能失败")
-
-    return ydl_opts
+    return apply_bilibili_ydl_defaults(
+        ydl_opts,
+        cookies_file=_bilibili_cookies_path(),
+        cookie_getter=cookie_manager.get,
+        request_logger=logger,
+    )
 
 
 class BilibiliDownloader(Downloader, ABC):
@@ -78,23 +69,7 @@ class BilibiliDownloader(Downloader, ABC):
 
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-        ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio/best',
-            'outtmpl': output_path,
-            'postprocessors': [
-                {
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '64',
-                }
-            ],
-            'noplaylist': True,
-            'quiet': False,
-            'skip_download': skip_download,
-        }
-        if skip_download:
-            ydl_opts.pop('postprocessors', None)
-            ydl_opts['quiet'] = True
+        ydl_opts = build_audio_ydl_opts(output_path, skip_download=skip_download)
         ydl_opts = _apply_bilibili_ydl_defaults(ydl_opts)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -128,8 +103,8 @@ class BilibiliDownloader(Downloader, ABC):
         if output_dir is None:
             output_dir = get_data_dir()
         os.makedirs(output_dir, exist_ok=True)
-        print("video_url",video_url)
-        video_id=extract_video_id(video_url, "bilibili")
+        logger.debug("解析 Bilibili 视频地址: %s", video_url)
+        video_id = extract_video_id(video_url, "bilibili")
         video_path = os.path.join(output_dir, f"{video_id}.mp4")
         if os.path.exists(video_path):
             return video_path
@@ -139,13 +114,7 @@ class BilibiliDownloader(Downloader, ABC):
 
         output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
-        ydl_opts = {
-            'format': 'bv*[ext=mp4]/bestvideo+bestaudio/best',
-            'outtmpl': output_path,
-            'noplaylist': True,
-            'quiet': False,
-            'merge_output_format': 'mp4',  # 确保合并成 mp4
-        }
+        ydl_opts = build_video_ydl_opts(output_path)
         ydl_opts = _apply_bilibili_ydl_defaults(ydl_opts)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -185,21 +154,15 @@ class BilibiliDownloader(Downloader, ABC):
         os.makedirs(output_dir, exist_ok=True)
 
         if langs is None:
-            langs = ['zh-Hans', 'zh', 'zh-CN', 'ai-zh', 'en', 'en-US']
+            langs = list(DEFAULT_SUBTITLE_LANGS)
 
         video_id = extract_video_id(video_url, "bilibili")
 
-        ydl_opts = {
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': langs,
-            'subtitlesformat': 'srt/json3/best',  # 支持多种格式
-            'skip_download': True,
-            'noplaylist': True,
-            'outtmpl': os.path.join(output_dir, f'{video_id}.%(ext)s'),
-            'quiet': True,
-        }
-
+        ydl_opts = build_subtitle_ydl_opts(
+            output_dir=output_dir,
+            video_id=video_id,
+            langs=langs,
+        )
         ydl_opts = _apply_bilibili_ydl_defaults(ydl_opts)
 
         try:
@@ -212,26 +175,13 @@ class BilibiliDownloader(Downloader, ABC):
                     logger.info(f"B站视频 {video_id} 没有可用字幕")
                     return None
 
-                # 按优先级查找字幕
-                detected_lang = None
-                sub_info = None
-                for lang in langs:
-                    if lang in subtitles:
-                        detected_lang = lang
-                        sub_info = subtitles[lang]
-                        break
-
-                # 如果按优先级没找到，取第一个可用的（排除弹幕）
-                if not detected_lang:
-                    for lang, info_item in subtitles.items():
-                        if lang != 'danmaku':  # 排除弹幕
-                            detected_lang = lang
-                            sub_info = info_item
-                            break
-
-                if not sub_info:
+                selection = choose_bilibili_subtitle(subtitles, langs)
+                if not selection:
                     logger.info(f"B站视频 {video_id} 没有可用字幕（排除弹幕）")
                     return None
+
+                detected_lang = selection.language
+                sub_info = selection.info
 
                 # 检查是否有内嵌数据（yt-dlp 有时直接返回字幕内容）
                 if 'data' in sub_info and sub_info['data']:
@@ -240,7 +190,12 @@ class BilibiliDownloader(Downloader, ABC):
 
                 # 查找字幕文件
                 ext = sub_info.get('ext', 'srt')
-                subtitle_file = os.path.join(output_dir, f"{video_id}.{detected_lang}.{ext}")
+                subtitle_file = build_bilibili_subtitle_file(
+                    output_dir,
+                    video_id,
+                    detected_lang,
+                    sub_info,
+                )
 
                 if not os.path.exists(subtitle_file):
                     logger.info(f"字幕文件不存在: {subtitle_file}")
@@ -265,45 +220,11 @@ class BilibiliDownloader(Downloader, ABC):
         :param language: 语言代码
         :return: TranscriptResult
         """
-        import re
-        try:
-            segments = []
-            # SRT 格式: 序号\n时间戳\n文本\n\n
-            pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})\n(.*?)(?=\n\n|\n\d+\n|$)'
-            matches = re.findall(pattern, srt_content, re.DOTALL)
-
-            for match in matches:
-                idx, start_time, end_time, text = match
-                text = text.strip()
-                if not text:
-                    continue
-
-                # 转换时间格式 00:00:00,000 -> 秒
-                def time_to_seconds(t):
-                    parts = t.replace(',', '.').split(':')
-                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
-
-                segments.append(TranscriptSegment(
-                    start=time_to_seconds(start_time),
-                    end=time_to_seconds(end_time),
-                    text=text
-                ))
-
-            if not segments:
-                return None
-
-            full_text = ' '.join(seg.text for seg in segments)
-            logger.info(f"成功解析B站SRT字幕，共 {len(segments)} 段")
-            return TranscriptResult(
-                language=language,
-                full_text=full_text,
-                segments=segments,
-                raw={'source': 'bilibili_subtitle', 'format': 'srt'}
-            )
-
-        except Exception as e:
-            logger.warning(f"解析SRT字幕失败: {e}")
-            return None
+        return parse_bilibili_srt_content(
+            srt_content,
+            language,
+            request_logger=logger,
+        )
 
     def _parse_json3_subtitle(self, subtitle_file: str, language: str) -> Optional[TranscriptResult]:
         """
@@ -313,42 +234,8 @@ class BilibiliDownloader(Downloader, ABC):
         :param language: 语言代码
         :return: TranscriptResult
         """
-        try:
-            with open(subtitle_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            segments = []
-            events = data.get('events', [])
-
-            for event in events:
-                # json3 格式中时间单位是毫秒
-                start_ms = event.get('tStartMs', 0)
-                duration_ms = event.get('dDurationMs', 0)
-
-                # 提取文本
-                segs = event.get('segs', [])
-                text = ''.join(seg.get('utf8', '') for seg in segs).strip()
-
-                if text:  # 只添加非空文本
-                    segments.append(TranscriptSegment(
-                        start=start_ms / 1000.0,
-                        end=(start_ms + duration_ms) / 1000.0,
-                        text=text
-                    ))
-
-            if not segments:
-                return None
-
-            full_text = ' '.join(seg.text for seg in segments)
-
-            logger.info(f"成功解析B站字幕，共 {len(segments)} 段")
-            return TranscriptResult(
-                language=language,
-                full_text=full_text,
-                segments=segments,
-                raw={'source': 'bilibili_subtitle', 'file': subtitle_file}
-            )
-
-        except Exception as e:
-            logger.warning(f"解析字幕文件失败: {e}")
-            return None
+        return parse_bilibili_json3_subtitle_file(
+            subtitle_file,
+            language,
+            request_logger=logger,
+        )

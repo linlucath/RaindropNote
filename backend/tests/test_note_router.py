@@ -3,12 +3,15 @@ import json
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from fastapi import HTTPException
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch
 
+from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
+from app.exceptions.note import NoteError
 from app.models.notes_model import NoteResult
 from app.routers import note as note_router
 from app.routers.note import run_note_task
@@ -57,6 +60,62 @@ class TestNoteRouter(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 400)
         generator_cls.return_value.generate.assert_not_called()
+
+    def test_note_router_helpers_match_router_validation_and_platform_contract(self):
+        from app.services import note_router_helpers
+
+        self.assertEqual(
+            note_router_helpers.validate_supported_url('/uploads/local.mp4'),
+            '/uploads/local.mp4',
+        )
+
+        with self.assertRaises(NoteError) as ctx:
+            note_router_helpers.validate_supported_url('https://example.com/watch?v=demo')
+        self.assertEqual(ctx.exception.code, NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code)
+        self.assertEqual(ctx.exception.message, NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message)
+
+        youtube_url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        self.assertEqual(
+            note_router_helpers.resolve_request_platform(video_url=youtube_url, platform=None),
+            'youtube',
+        )
+        self.assertEqual(
+            note_router._resolve_request_platform(SimpleNamespace(video_url=youtube_url, platform=None)),
+            'youtube',
+        )
+
+        with self.assertRaises(HTTPException) as ctx:
+            note_router_helpers.resolve_request_platform(video_url='/uploads/local.mp4', platform=None)
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message)
+
+        with self.assertRaises(HTTPException) as ctx:
+            note_router_helpers.resolve_request_platform(
+                video_url='https://example.com/video/1',
+                platform=None,
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, '请选择平台')
+
+    def test_note_router_private_wrappers_delegate_to_note_router_helpers(self):
+        from app.services import note_router_helpers
+
+        with patch.object(note_router_helpers, 'validate_supported_url', return_value='validated') as validate:
+            self.assertEqual(note_router.VideoRequest.validate_supported_url('raw'), 'validated')
+        validate.assert_called_once_with('raw')
+
+        with patch.object(note_router_helpers, 'normalize_generation_mode', return_value='normalized') as normalize:
+            self.assertEqual(note_router._normalize_generation_mode('raw-mode'), 'normalized')
+        normalize.assert_called_once_with('raw-mode')
+
+        with patch.object(note_router_helpers, 'reject_unsupported_platform') as reject:
+            note_router._reject_unsupported_platform()
+        reject.assert_called_once_with()
+
+        request_data = SimpleNamespace(video_url='https://example.com/video/1', platform=None)
+        with patch.object(note_router_helpers, 'resolve_request_platform', return_value='resolved') as resolve:
+            self.assertEqual(note_router._resolve_request_platform(request_data), 'resolved')
+        resolve.assert_called_once_with(video_url=request_data.video_url, platform=request_data.platform)
 
     def test_delete_task_removes_saved_task_from_refreshed_task_list(self):
         @asynccontextmanager

@@ -1,8 +1,3 @@
-import json
-import os
-from pathlib import Path
-from typing import Optional
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -13,25 +8,24 @@ from app.db.favorite_dao import (
     list_favorites,
     upsert_favorite,
 )
+from app.services.favorite_notes import (
+    _load_task_result as _load_task_result_from_service,
+    build_favorite_note,
+)
+from app.services.task_runtime import default_note_output_dir
 from app.utils.response import ResponseWrapper as R
 
 router = APIRouter()
 
-NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
+NOTE_OUTPUT_DIR = str(default_note_output_dir())
 
 
 class FavoriteCreateRequest(BaseModel):
     task_id: str
 
 
-def _load_task_result(task_id: str) -> Optional[dict]:
-    result_path = Path(NOTE_OUTPUT_DIR) / f"{task_id}.json"
-    if not result_path.exists():
-        return None
-    try:
-        return json.loads(result_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+def _load_task_result(task_id: str):
+    return _load_task_result_from_service(task_id, NOTE_OUTPUT_DIR)
 
 
 @router.get("/favorites")
@@ -57,16 +51,16 @@ def create_favorite(data: FavoriteCreateRequest):
     result = _load_task_result(data.task_id)
     if result is None:
         return R.error(msg="任务结果不存在，无法收藏", code=404)
+    note = build_favorite_note(result)
 
-    audio_meta = result.get("audio_meta") or result.get("audioMeta") or {}
     favorite = upsert_favorite(
         source_task_id=data.task_id,
-        title=audio_meta.get("title") or "未命名文字稿",
-        video_id=audio_meta.get("video_id"),
-        platform=audio_meta.get("platform"),
-        markdown=result.get("markdown") or "",
-        transcript=result.get("transcript"),
-        audio_meta=audio_meta,
+        title=note["title"],
+        video_id=note["video_id"],
+        platform=note["platform"],
+        markdown=note["markdown"],
+        transcript=note["transcript"],
+        audio_meta=note["audio_meta"],
     )
     return R.success({"favorite": favorite}, msg="收藏成功")
 

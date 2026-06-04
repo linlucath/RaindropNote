@@ -44,7 +44,7 @@ class WhisperTranscriber(Transcriber):
         else:
             self.device = "cuda" if self.is_cuda() else "cpu"
             if device == 'cuda' and self.device == 'cpu':
-                print('没有 cuda 使用 cpu进行计算')
+                logger.warning('没有 cuda 使用 cpu进行计算')
 
         self.compute_type = compute_type or ("float16" if self.device == "cuda" else "int8")
 
@@ -83,13 +83,13 @@ class WhisperTranscriber(Transcriber):
     def is_cuda() -> bool:
         try:
             if is_cuda_available():
-                print(" CUDA 可用，使用 GPU")
+                logger.info(" CUDA 可用，使用 GPU")
                 return True
             elif is_torch_installed():
-                print(" 只装了 torch，但没有 CUDA，用 CPU")
+                logger.warning(" 只装了 torch，但没有 CUDA，用 CPU")
                 return False
             else:
-                print(" 还没有安装 torch，请先安装")
+                logger.warning(" 还没有安装 torch，请先安装")
                 return False
 
         except ImportError:
@@ -122,11 +122,11 @@ class WhisperTranscriber(Transcriber):
             # self.on_finish(file_path, result)
             return result
         except Exception as e:
-            print(f"转写失败：{e}")
+            logger.error(f"转写失败：{e}")
 
 
     def on_finish(self,video_path:str,result: TranscriptResult)->None:
-        print("转写完成")
+        logger.info("转写完成")
         transcription_finished.send({
             "file_path": video_path,
         })

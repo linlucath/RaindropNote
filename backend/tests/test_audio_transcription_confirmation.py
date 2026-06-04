@@ -36,8 +36,8 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
     def test_generate_stops_at_cancel_checkpoints_before_next_stage(self):
         checkpoints = [
             ('after_parsing', 'note'),
+            ('after_subtitles', 'note'),
             ('after_download', 'note'),
-            ('after_transcription', 'transcript'),
             ('after_summarizing', 'note'),
             ('before_saving', 'transcript'),
         ]
@@ -54,7 +54,6 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                 generator._get_gpt = Mock(return_value=Mock())
 
                 downloader = Mock()
-                downloader.download_subtitles.return_value = None
 
                 with tempfile.TemporaryDirectory() as tmp:
                     output_dir = Path(tmp)
@@ -72,6 +71,13 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
 
                     def cancel_now():
                         request_task_cancel(task_id=task_id, output_dir=output_dir)
+
+                    def download_subtitles(_video_url):
+                        if checkpoint == 'after_subtitles':
+                            cancel_now()
+                        return _transcript()
+
+                    downloader.download_subtitles.side_effect = download_subtitles
 
                     if checkpoint == 'after_parsing':
                         generator._get_downloader = Mock(side_effect=lambda _platform: (cancel_now(), downloader)[1])
@@ -101,7 +107,10 @@ class TestAudioTranscriptionConfirmation(unittest.TestCase):
                                 cancel_now()
                             return '# 标题\n\n## 简体中文文字稿\n\n已有字幕'
 
-                        generator._download_media = Mock(side_effect=download_media)
+                        if checkpoint == 'after_subtitles':
+                            generator._download_media = Mock(side_effect=AssertionError('should not download media'))
+                        else:
+                            generator._download_media = Mock(side_effect=download_media)
                         generator._get_transcript = Mock(side_effect=get_transcript)
                         generator._summarize_text = Mock(side_effect=summarize_text)
                         generator._build_transcript_markdown = Mock(side_effect=build_transcript_markdown)

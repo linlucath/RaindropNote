@@ -1,16 +1,23 @@
 import datetime
 import json
+import logging
 import os
-import re
 from typing import Union, Optional
 from urllib.parse import quote, urlencode
 
 import httpx
 import requests
-from pydantic import BaseModel
 
 from app.downloaders.base import Downloader
+from app.downloaders import douyin_parsing
 from app.downloaders.douyin_helper.abogus import ABogus
+from app.downloaders.douyin_request import (
+    BaseRequestModel,
+    build_aweme_detail_request,
+    build_headers_config,
+    redact_douyin_params,
+    summarize_headers_for_log,
+)
 from app.enmus.note_enums import DownloadQuality
 from app.models.audio_model import AudioDownloadResult
 from app.services.cookie_manager import CookieConfigManager
@@ -19,8 +26,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 DOUYIN_DOMAIN = "https://www.douyin.com"
+logger = logging.getLogger(__name__)
 
 cfm=CookieConfigManager()
+
+
+def _douyin_headers_log_summary(headers: dict) -> dict:
+    return summarize_headers_for_log(headers)
+
+
+def _redacted_douyin_params(params: dict) -> dict:
+    return redact_douyin_params(params)
+
+
 def get_timestamp(unit: str = "milli"):
     """
     根据给定的单位获取当前时间 (Get the current time based on the given unit)
@@ -72,57 +90,18 @@ class DouyinConfig:
     }
 
 
-class BaseRequestModel(BaseModel):
-    device_platform: str = "webapp"
-    aid: str = "6383"
-    channel: str = "channel_pc_web"
-    pc_client_type: int = 1
-    version_code: str = "290100"
-    version_name: str = "29.1.0"
-    cookie_enabled: str = "true"
-    screen_width: int = 1920
-    screen_height: int = 1080
-    browser_language: str = "zh-CN"
-    browser_platform: str = "Win32"
-    browser_name: str = "Chrome"
-    browser_version: str = "130.0.0.0"
-    browser_online: str = "true"
-    engine_name: str = "Blink"
-    engine_version: str = "130.0.0.0"
-    os_name: str = "Windows"
-    os_version: str = "10"
-    cpu_core_num: int = 12
-    device_memory: int = 8
-    platform: str = "PC"
-    downlink: str = "10"
-    effective_type: str = "4g"
-    from_user_page: str = "1"
-    locate_query: str = "false"
-    need_time_list: str = "1"
-    pc_libra_divert: str = "Windows"
-    publish_video_strategy_type: str = "2"
-    round_trip_time: str = "0"
-    show_live_replay_strategy: str = "1"
-    time_list_query: str = "0"
-    whale_cut_token: str = ""
-    update_version_code: str = "170400"
-    msToken: str = None
-
-
 class DouyinDownloader(Downloader):
     def __init__(self, cookie=None):
         super().__init__()
-        self.headers_config = DouyinConfig.HEADERS.copy()
-        self.headers_config["Cookie"] = cfm.get('douyin')
-        print(self.headers_config)
+        self.headers_config = build_headers_config(DouyinConfig.HEADERS, cfm.get('douyin'))
+        logger.debug("Douyin headers config initialized: %s", _douyin_headers_log_summary(self.headers_config))
         self.proxies_config = DouyinConfig.PROXIES.copy()
         self.ttwid_config = DouyinConfig.TTWID.copy()
         self.ms_token_config = DouyinConfig.MS_TOKEN.copy()
 
     @staticmethod
     def find_url(string: str) -> list:
-        url = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', string)
-        return url
+        return douyin_parsing.find_urls(string)
 
     def extract_video_id(self, url: str) -> str:
         video_url = self.find_url(url)
@@ -134,15 +113,7 @@ class DouyinDownloader(Downloader):
                 url = response.url
             except Exception as e:
                 return ""
-        patterns = [
-            r'video/(\d+)',
-            r'aweme_id=(\d+)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, url)
-            if match:
-                return match.group(1)
-        return ""
+        return douyin_parsing.extract_aweme_id(url)
 
     def gen_real_msToken(self) -> str:
         try:
@@ -181,31 +152,30 @@ class DouyinDownloader(Downloader):
         try:
 
             aweme_id = self.extract_video_id(video_url)
-            kwargs = self.headers_config
-            print("@kwargs:", kwargs)
-            base_params = BaseRequestModel().model_dump()
-            base_params["msToken"] = self.gen_real_msToken()
+            request = build_aweme_detail_request(
+                headers_template=self.headers_config,
+                cookie=self.headers_config.get("Cookie"),
+                aweme_id=aweme_id,
+                ms_token=self.gen_real_msToken(),
+                abogus_cls=ABogus,
+                request_model_cls=BaseRequestModel,
+                domain=DOUYIN_DOMAIN,
+                quote_func=quote,
+                urlencode_func=urlencode,
+            )
+            logger.debug("Douyin request headers prepared: %s", _douyin_headers_log_summary(request.headers))
+            logger.debug("Douyin a_bogus generated: length=%d", request.signature_length)
+            logger.debug("Douyin base params: %s", _redacted_douyin_params(request.params))
+            logger.debug("Douyin request URL prepared: domain=%s aweme_id=%s", DOUYIN_DOMAIN, aweme_id)
 
-            base_params["aweme_id"] = aweme_id
-            bogus = ABogus()
-            ab_value = bogus.get_value(base_params)
-            a_bogus = quote(ab_value, safe='')
-            print("@a_bogus:", a_bogus)
-            print(base_params)
-            query_str = urlencode(base_params)
-            full_url = f"{DOUYIN_DOMAIN}/aweme/v1/web/aweme/detail/?{query_str}&a_bogus={a_bogus}"
 
-            print("Request URL:", full_url)
+            response = requests.get(request.url, headers=request.headers)
 
-
-            response = requests.get(full_url, headers=kwargs)
-
-            print("Response JSON:", response.content)
+            logger.debug("Douyin response content length: %d", len(response.content))
             return response.json()
         except Exception as e:
-            print("请求失败:", e)
+            logger.exception("请求失败: %s", e)
             raise ValueError("请求失败:", e)
-        # print(kwargs)
 
     def download(
             self,
@@ -215,8 +185,11 @@ class DouyinDownloader(Downloader):
             need_video: Optional[bool] = False
     ) -> AudioDownloadResult:
         try:
-            print(
-                f"正在下载视频: {video_url}，保存路径: {output_dir}，质量: {quality}"
+            logger.info(
+                "正在下载视频: %s，保存路径: %s，质量: %s",
+                video_url,
+                output_dir,
+                quality,
             )
             if output_dir is None:
                 output_dir = get_data_dir()
@@ -231,27 +204,23 @@ class DouyinDownloader(Downloader):
                 "id": video_data['aweme_detail']['aweme_id'],
                 "ext": "mp3",
             }
-            url = video_data['aweme_detail']['music']['play_url']['uri']
+            audio_metadata = douyin_parsing.parse_audio_metadata(video_data)
+            url = audio_metadata["audio_url"]
             # 下载音频
             audio_data = requests.get(url)
             with open(output_path, 'wb') as f:
                 f.write(audio_data.content)
-            print(url)
-            tags = []
-            for tag in video_data['aweme_detail']['video_tag']:
-                if tag['tag_name']:
-                    tags.append(tag['tag_name'])
+            logger.debug("Douyin audio url: %s", url)
 
             return AudioDownloadResult(
                 file_path=output_path,
-                title=video_data['aweme_detail']['item_title'],
-                duration=video_data['aweme_detail']['video']['duration'],
-                cover_url=video_data['aweme_detail']['video']['cover_original_scale']['url_list'][0] if
-                video_data['aweme_detail']['video']['cover'] else video_data['video']['big_thumbs']['img_url'],
+                title=audio_metadata["title"],
+                duration=audio_metadata["duration"],
+                cover_url=audio_metadata["cover_url"],
                 platform="douyin",
-                video_id=video_data['aweme_detail']['aweme_id'],
+                video_id=audio_metadata["video_id"],
                 raw_info={
-                    'tags': video_data['aweme_detail']['caption'] + ''.join(tags),
+                    'tags': audio_metadata["raw_tags"],
                 },
                 video_path=None  # ❗音频下载不包含视频路径
             )
@@ -277,12 +246,13 @@ class DouyinDownloader(Downloader):
             output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
             video_data = self.fetch_video_info(video_url)
+            video_metadata = douyin_parsing.parse_video_download_metadata(video_data)
             output_path = output_path % {
-                "id": video_data['aweme_detail']['aweme_id'],
+                "id": video_metadata["video_id"],
                 "ext": "mp4",
             }
 
-            url=video_data['aweme_detail']['video']['download_addr']['url_list'][0]
+            url=video_metadata["download_url"]
             _data = requests.get(url,allow_redirects=True,headers=self.headers_config)
 
             with open(output_path, 'wb') as f:
@@ -290,7 +260,7 @@ class DouyinDownloader(Downloader):
 
             return output_path
         except Exception as e:
-            print("请求失败:", e)
+            logger.exception("请求失败: %s", e)
             raise ValueError("请求失败:", e)
 
 

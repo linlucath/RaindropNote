@@ -42,7 +42,7 @@ class KuaishouTranscriber(Transcriber):
             response.raise_for_status()  # 检查HTTP错误
             
             result = response.json()
-            print('result',result)
+            logger.debug(f"result {result}")
             # 检查快手API返回是否包含错误
             if "data" not in result or result.get("code", 0) != 0:
                 error_msg = f"快手API返回错误: {result.get('message', '未知错误')}"

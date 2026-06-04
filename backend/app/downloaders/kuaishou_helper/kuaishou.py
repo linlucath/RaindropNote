@@ -54,11 +54,12 @@ class KuaiShou:
 
     def get_temp_cookies(self):
         is_exist = cfm.get('kuaishou')
-        print(is_exist)
         if is_exist:
+            logger.debug("使用已配置的快手 Cookie")
             return is_exist
         res = requests.get(url=KUAISHOU_URL, headers=self.header, allow_redirects=True)
         cookie_string = '; '.join([f"{k}={v}" for k, v in res.cookies.get_dict().items()])
+        logger.debug("从快手首页获取临时 Cookie")
         return cookie_string
 
     def get_video_details(self, url, photo_id):
@@ -89,9 +90,15 @@ class KuaiShou:
         if photo_id is None:
             logger.error(f"快手视频 ID 解析失败 {url}")
         video_details = self.get_video_details(real_url, photo_id)
-        print(video_details)
         if video_details is None:
             logger.error(f"快手视频详情解析失败 {url}")
+        detail = (video_details.get('data') or {}).get('visionVideoDetail') or {}
+        photo = detail.get('photo') or {}
+        logger.debug(
+            "快手视频详情解析成功: status=%s, photo_id=%s",
+            detail.get('status'),
+            photo.get('id'),
+        )
         return video_details['data']
 
 

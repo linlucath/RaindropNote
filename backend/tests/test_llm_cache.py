@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from app.gpt.llm_cache import LlmCache
 from app.gpt.universal_gpt import UniversalGPT
 
 
@@ -31,6 +32,33 @@ class _FakeClient:
 
 
 class TestLlmCache(unittest.TestCase):
+    def test_helper_can_save_and_load_cached_response_independently(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            client = _FakeClient('unused')
+            cache = LlmCache(
+                client=client,
+                model='demo-model',
+                temperature=0.7,
+                cache_dir=Path(tmp) / '.cache' / 'llm',
+                enabled=True,
+            )
+            messages = [{'role': 'user', 'content': [{'type': 'text', 'text': 'hello'}]}]
+            cache_key = cache.cache_key(messages)
+
+            cache.save(cache_key, 'cached answer')
+            response = cache.load(cache_key)
+
+            cache_files = list(cache.cache_dir.glob('*.json'))
+            payload = json.loads(cache_files[0].read_text(encoding='utf-8'))
+
+        self.assertEqual(response.choices[0].message.content, 'cached answer')
+        self.assertTrue(getattr(response, 'from_cache', False))
+        self.assertEqual(len(cache_files), 1)
+        self.assertEqual(payload['provider_base_url'], 'https://example.com/v1')
+        self.assertEqual(payload['model'], 'demo-model')
+        self.assertEqual(payload['temperature'], 0.7)
+        self.assertEqual(payload['content'], 'cached answer')
+
     def test_chat_completion_uses_persistent_disk_cache(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = _FakeClient('cached answer')

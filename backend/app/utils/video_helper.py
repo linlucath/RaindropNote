@@ -1,3 +1,4 @@
+import logging
 import shutil
 from pathlib import Path
 
@@ -5,11 +6,13 @@ from dotenv import load_dotenv
 import subprocess
 import os
 import uuid
+
 load_dotenv()
 api_path = os.getenv("API_BASE_URL", "http://localhost")
 BACKEND_PORT= os.getenv("BACKEND_PORT", 8483)
 
 BACKEND_BASE_URL = f"{api_path}:{BACKEND_PORT}"
+logger = logging.getLogger(__name__)
 
 from typing import Optional
 def generate_screenshot(video_path: str, output_dir: str, timestamp: int, index: int) -> str:
@@ -32,11 +35,11 @@ def generate_screenshot(video_path: str, output_dir: str, timestamp: int, index:
         "-y"
     ]
 
-    print("Running command:", command)
+    logger.debug("Running command: %s", command)
     result = subprocess.run(command, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print("ffmpeg failed:", result.stderr)
+        logger.warning("ffmpeg failed: %s", result.stderr)
 
     return str(output_path)
 

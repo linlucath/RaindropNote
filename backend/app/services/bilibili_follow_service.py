@@ -6,18 +6,29 @@ from typing import Any
 
 import requests
 
+from app.services.bilibili_api_client import BilibiliApiClient
+
 FOLLOWINGS_API_URL = 'https://api.bilibili.com/x/relation/followings'
 
 
 @dataclass
 class BilibiliFollowService:
     cookie_getter: Any
+    request_get: Any | None = None
+
+    def _request_get(self, url: str, **kwargs: Any) -> Any:
+        return requests.get(url, **kwargs)
+
+    def _api_client(self) -> BilibiliApiClient:
+        return BilibiliApiClient(
+            cookie_getter=self.cookie_getter,
+            referer='https://space.bilibili.com/',
+            origin='https://space.bilibili.com',
+            request_get=self.request_get or self._request_get,
+        )
 
     def _get_cookie(self) -> str:
-        cookie = (self.cookie_getter('bilibili') or '').strip()
-        if not cookie:
-            raise ValueError('请先在设置页填写 Bilibili Cookie')
-        return cookie
+        return self._api_client().get_cookie()
 
     def _get_self_mid(self, cookie: str) -> str:
         parsed_cookie = SimpleCookie()
@@ -29,17 +40,7 @@ class BilibiliFollowService:
         return mid
 
     def _build_headers(self, cookie: str) -> dict[str, str]:
-        return {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/124.0.0.0 Safari/537.36'
-            ),
-            'Referer': 'https://space.bilibili.com/',
-            'Origin': 'https://space.bilibili.com',
-            'Accept': 'application/json, text/plain, */*',
-            'Cookie': cookie,
-        }
+        return self._api_client().build_headers(cookie)
 
     def _normalize_avatar_url(self, url: Any) -> str:
         avatar_url = str(url or '').strip()
@@ -70,19 +71,12 @@ class BilibiliFollowService:
             'ps': page_size,
             'order': 'desc',
         }
-        response = requests.get(
+        payload = self._api_client().request_json(
             FOLLOWINGS_API_URL,
             params=params,
-            headers=self._build_headers(cookie),
-            timeout=15,
+            fallback_error='获取关注列表失败',
+            cookie=cookie,
         )
-        response.raise_for_status()
-        payload = response.json()
-        code = payload.get('code', -1)
-        if code != 0:
-            if code in {-101, 22007, 22115}:
-                raise ValueError('Bilibili Cookie 已失效，请重新更新')
-            raise ValueError(payload.get('message') or payload.get('msg') or '获取关注列表失败')
 
         data = payload.get('data') or {}
         raw_items = data.get('list') or []

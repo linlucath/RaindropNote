@@ -36,6 +36,33 @@ class TestBilibiliFollowService(unittest.TestCase):
             }
         ])
 
+    def test_get_followings_accepts_injected_request_get(self):
+        calls = []
+        response = Mock()
+        response.json.return_value = {
+            'code': 0,
+            'data': {
+                'list': [],
+                'total': 0,
+            },
+        }
+        response.raise_for_status.return_value = None
+
+        def request_get(url, **kwargs):
+            calls.append({'url': url, **kwargs})
+            return response
+
+        service = BilibiliFollowService(
+            lambda _platform: 'DedeUserID=12345;',
+            request_get=request_get,
+        )
+
+        payload = service.get_followings(page=1, page_size=20)
+
+        self.assertEqual(payload['items'], [])
+        self.assertEqual(calls[0]['headers']['Cookie'], 'DedeUserID=12345;')
+        self.assertEqual(calls[0]['headers']['Referer'], 'https://space.bilibili.com/')
+
 
 if __name__ == '__main__':
     unittest.main()
