@@ -1,3 +1,4 @@
+import logging
 import os
 import subprocess
 from abc import ABC
@@ -10,6 +11,9 @@ from app.downloaders.kuaishou_helper.kuaishou import KuaiShou
 from app.enmus.note_enums import DownloadQuality
 from app.models.audio_model import AudioDownloadResult
 from app.utils.path_helper import get_data_dir
+
+
+logger = logging.getLogger(__name__)
 
 
 class KuaiShouDownloader(Downloader, ABC):
@@ -31,7 +35,7 @@ class KuaiShouDownloader(Downloader, ABC):
 
         ks = KuaiShou()
         video_raw_info = ks.run(video_url)
-        print(video_raw_info)
+        logger.debug("KuaiShou video raw info: %s", video_raw_info)
         photo_info = video_raw_info['visionVideoDetail']['photo']
         video_id = photo_info['id']
         title = photo_info['caption'].strip().replace('\n', '').replace(' ', '_')[:50]
@@ -39,7 +43,7 @@ class KuaiShouDownloader(Downloader, ABC):
         mp3_path = os.path.join(output_dir, f"{video_id}.mp3")
 
         if os.path.exists(mp3_path):
-            print(f"[已存在] 跳过下载: {mp3_path}")
+            logger.info("[已存在] 跳过下载: %s", mp3_path)
             return AudioDownloadResult(
                 file_path=mp3_path,
                 title=title,
@@ -88,8 +92,9 @@ class KuaiShouDownloader(Downloader, ABC):
             video_url: str,
             output_dir: Union[str, None] = None,
     ) -> str:
-        print('self.download(video_url, output_dir).video_path',self.download(video_url, output_dir).video_path)
-        return self.download(video_url, output_dir).video_path
+        result = self.download(video_url, output_dir)
+        logger.debug("KuaiShou video path: %s", result.video_path)
+        return result.video_path
 
 
 if __name__ == '__main__':

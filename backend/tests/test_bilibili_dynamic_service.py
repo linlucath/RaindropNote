@@ -124,6 +124,34 @@ class TestBilibiliDynamicService(unittest.TestCase):
         self.assertTrue(payload['has_more'])
         self.assertEqual(payload['offset'], 'dynamic-1')
 
+    def test_get_video_dynamics_accepts_injected_request_get(self):
+        calls = []
+        response = Mock()
+        response.json.return_value = {
+            'code': 0,
+            'data': {
+                'has_more': False,
+                'offset': '',
+                'items': [],
+            },
+        }
+        response.raise_for_status.return_value = None
+
+        def request_get(url, **kwargs):
+            calls.append({'url': url, **kwargs})
+            return response
+
+        service = BilibiliDynamicService(
+            lambda _platform: 'SESSDATA=test;',
+            request_get=request_get,
+        )
+
+        payload = service.get_video_dynamics(page_size=20, offset=None)
+
+        self.assertEqual(payload['items'], [])
+        self.assertEqual(calls[0]['headers']['Cookie'], 'SESSDATA=test;')
+        self.assertEqual(calls[0]['headers']['Referer'], 'https://t.bilibili.com/')
+
 
 if __name__ == '__main__':
     unittest.main()

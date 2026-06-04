@@ -2,12 +2,107 @@ from app.gpt.base import GPT
 from app.gpt.prompt_builder import generate_base_prompt
 from app.models.gpt_model import GPTSource
 import os
-import hashlib
 import json
 import time
-from types import SimpleNamespace
-from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from app.gpt.checkpoint_store import (
+        checkpoint_path,
+        clear_checkpoint,
+        load_checkpoint,
+        save_checkpoint,
+    )
+except ModuleNotFoundError:  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    checkpoint_store_path = Path(__file__).with_name("checkpoint_store.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_checkpoint_store", checkpoint_store_path)
+    if spec is None or spec.loader is None:
+        raise
+    checkpoint_store = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = checkpoint_store
+    spec.loader.exec_module(checkpoint_store)
+    checkpoint_path = checkpoint_store.checkpoint_path
+    clear_checkpoint = checkpoint_store.clear_checkpoint
+    load_checkpoint = checkpoint_store.load_checkpoint
+    save_checkpoint = checkpoint_store.save_checkpoint
+
+try:
+    from app.gpt.retry_policy import is_retryable_error, retry_backoff_seconds
+except ModuleNotFoundError:  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    retry_policy_path = Path(__file__).with_name("retry_policy.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_retry_policy", retry_policy_path)
+    if spec is None or spec.loader is None:
+        raise
+    retry_policy = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = retry_policy
+    spec.loader.exec_module(retry_policy)
+    is_retryable_error = retry_policy.is_retryable_error
+    retry_backoff_seconds = retry_policy.retry_backoff_seconds
+
+try:
+    from app.gpt.llm_cache import LlmCache, default_llm_cache_dir, default_llm_cache_enabled
+except ModuleNotFoundError:  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    llm_cache_path = Path(__file__).with_name("llm_cache.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_llm_cache", llm_cache_path)
+    if spec is None or spec.loader is None:
+        raise
+    llm_cache_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = llm_cache_module
+    spec.loader.exec_module(llm_cache_module)
+    LlmCache = llm_cache_module.LlmCache
+    default_llm_cache_dir = llm_cache_module.default_llm_cache_dir
+    default_llm_cache_enabled = llm_cache_module.default_llm_cache_enabled
+
+try:
+    from app.gpt import polished_transcript
+except (ModuleNotFoundError, ImportError):  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    polished_transcript_path = Path(__file__).with_name("polished_transcript.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_polished_transcript", polished_transcript_path)
+    if spec is None or spec.loader is None:
+        raise
+    polished_transcript = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = polished_transcript
+    spec.loader.exec_module(polished_transcript)
+
+try:
+    from app.gpt import message_payloads
+except (ModuleNotFoundError, ImportError):  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    message_payloads_path = Path(__file__).with_name("message_payloads.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_message_payloads", message_payloads_path)
+    if spec is None or spec.loader is None:
+        raise
+    message_payloads = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = message_payloads
+    spec.loader.exec_module(message_payloads)
+
+try:
+    from app.gpt import source_signature
+except (ModuleNotFoundError, ImportError):  # pragma: no cover - supports isolated import tests
+    import importlib.util
+    import sys
+
+    source_signature_path = Path(__file__).with_name("source_signature.py")
+    spec = importlib.util.spec_from_file_location("_universal_gpt_source_signature", source_signature_path)
+    if spec is None or spec.loader is None:
+        raise
+    source_signature = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = source_signature
+    spec.loader.exec_module(source_signature)
 
 from app.gpt.prompt import (
     BASE_PROMPT,
@@ -23,8 +118,13 @@ from app.gpt.prompt import (
 from app.gpt.utils import fix_markdown
 from app.gpt.request_chunker import RequestChunker
 from app.models.transcriber_model import TranscriptSegment
-from app.utils.logger import get_logger
-from datetime import timedelta
+try:
+    from app.utils.logger import get_logger
+except ModuleNotFoundError:  # pragma: no cover - supports isolated import tests
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -42,196 +142,68 @@ class UniversalGPT(GPT):
         self.polished_transcript_max_source_chars = int(os.getenv("POLISHED_TRANSCRIPT_MAX_SOURCE_CHARS", "4000"))
         self.checkpoint_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        self.llm_cache_enabled = os.getenv("LLM_CACHE_ENABLED", "1").lower() not in {"0", "false", "no"}
-        self.llm_cache_dir = Path(
-            os.getenv(
-                "LLM_CACHE_DIR",
-                str(Path(__file__).resolve().parents[3] / ".cache" / "llm"),
-            )
-        )
+        self.llm_cache_enabled = default_llm_cache_enabled()
+        self.llm_cache_dir = default_llm_cache_dir()
         # 初始化时缓存重试配置，避免每次请求重复读取环境变量
         self._max_retry_attempts = max(1, int(os.getenv("OPENAI_RETRY_ATTEMPTS", "3")))
         self._retry_base_backoff = float(os.getenv("OPENAI_RETRY_BACKOFF_SECONDS", "1.5"))
 
-    @staticmethod
-    def _build_cached_response(content: str):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-            from_cache=True,
+    def _llm_cache_helper(self) -> LlmCache:
+        return LlmCache(
+            client=self.client,
+            model=self.model,
+            temperature=self.temperature,
+            cache_dir=self.llm_cache_dir,
+            enabled=self.llm_cache_enabled,
         )
 
+    @staticmethod
+    def _build_cached_response(content: str):
+        return LlmCache.build_cached_response(content)
+
     def _cache_provider_base_url(self) -> str | None:
-        base_url = getattr(self.client, "base_url", None)
-        if base_url is None and hasattr(self.client, "_base_url"):
-            base_url = getattr(self.client, "_base_url")
-        return str(base_url) if base_url else None
+        return self._llm_cache_helper().provider_base_url()
 
     def _llm_cache_key(self, messages: list) -> str:
-        payload = {
-            "version": 1,
-            "provider_base_url": self._cache_provider_base_url(),
-            "model": self.model,
-            "temperature": self.temperature,
-            "messages": messages,
-        }
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return self._llm_cache_helper().cache_key(messages)
 
     def _llm_cache_path(self, cache_key: str) -> Path:
-        return self.llm_cache_dir / f"{cache_key}.json"
+        return self._llm_cache_helper().path(cache_key)
 
     @staticmethod
     def _cache_key_preview(cache_key: str) -> str:
-        return cache_key[:12]
+        return LlmCache.key_preview(cache_key)
 
     def _summarize_messages(self, messages: list) -> str:
-        parts = []
-        for message in messages:
-            role = message.get("role", "unknown")
-            content = message.get("content")
-            if isinstance(content, list):
-                text_chars = sum(
-                    len(item.get("text", ""))
-                    for item in content
-                    if isinstance(item, dict) and item.get("type") == "text"
-                )
-                image_count = sum(
-                    1
-                    for item in content
-                    if isinstance(item, dict) and item.get("type") == "image_url"
-                )
-                parts.append(f"{role}:parts={len(content)},text_chars={text_chars},images={image_count}")
-            elif isinstance(content, str):
-                parts.append(f"{role}:chars={len(content)}")
-            else:
-                parts.append(f"{role}:type={type(content).__name__}")
-        return "; ".join(parts)
+        return message_payloads.summarize_messages(messages)
 
     def _load_llm_cache(self, cache_key: str):
-        if not self.llm_cache_enabled:
-            logger.info(
-                "LLM cache bypassed: reason=disabled key=%s model=%s provider=%s",
-                self._cache_key_preview(cache_key),
-                self.model,
-                self._cache_provider_base_url(),
-            )
-            return None
-
-        path = self._llm_cache_path(cache_key)
-        if not path.exists():
-            logger.info(
-                "LLM cache miss: reason=not_found key=%s path=%s",
-                self._cache_key_preview(cache_key),
-                path,
-            )
-            return None
-
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning(
-                "LLM cache invalid_json: key=%s path=%s error=%s; removing cache file",
-                self._cache_key_preview(cache_key),
-                path,
-                exc,
-            )
-            path.unlink(missing_ok=True)
-            return None
-
-        content = payload.get("content")
-        if not isinstance(content, str):
-            logger.warning(
-                "LLM cache invalid_payload: key=%s path=%s content_type=%s; removing cache file",
-                self._cache_key_preview(cache_key),
-                path,
-                type(content).__name__,
-            )
-            path.unlink(missing_ok=True)
-            return None
-
-        logger.info(
-            "LLM cache hit: key=%s path=%s content_chars=%d",
-            self._cache_key_preview(cache_key),
-            path,
-            len(content),
-        )
-        return self._build_cached_response(content)
+        return self._llm_cache_helper().load(cache_key)
 
     def _save_llm_cache(self, cache_key: str, content: str) -> None:
-        if not self.llm_cache_enabled:
-            return
-
-        if not isinstance(content, str) or not content.strip():
-            logger.info(
-                "LLM cache skip_save: key=%s reason=empty_or_non_string content_type=%s",
-                self._cache_key_preview(cache_key),
-                type(content).__name__,
-            )
-            return
-
-        self.llm_cache_dir.mkdir(parents=True, exist_ok=True)
-        path = self._llm_cache_path(cache_key)
-        payload = {
-            "version": 1,
-            "provider_base_url": self._cache_provider_base_url(),
-            "model": self.model,
-            "temperature": self.temperature,
-            "content": content,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
-        logger.info(
-            "LLM cache saved: key=%s path=%s content_chars=%d",
-            self._cache_key_preview(cache_key),
-            path,
-            len(content),
-        )
+        self._llm_cache_helper().save(cache_key, content)
 
     def _format_time(self, seconds: float) -> str:
-        return str(timedelta(seconds=int(seconds)))[2:]
+        return message_payloads.format_time(seconds)
 
     def _build_segment_text(self, segments: List[TranscriptSegment]) -> str:
-        return "\n".join(
-            f"{self._format_time(seg.start)} - {seg.text.strip()}"
-            for seg in segments
-        )
+        return message_payloads.build_segment_text(segments, self._format_time)
 
     def ensure_segments_type(self, segments) -> List[TranscriptSegment]:
         return [TranscriptSegment(**seg) if isinstance(seg, dict) else seg for seg in segments]
 
     def create_messages(self, segments: List[TranscriptSegment], **kwargs):
 
-        content_text = generate_base_prompt(
-            title=kwargs.get('title'),
+        return message_payloads.build_note_messages(
             segment_text=self._build_segment_text(segments),
+            title=kwargs.get('title'),
             tags=kwargs.get('tags'),
             _format=kwargs.get('_format'),
             style=kwargs.get('style'),
             extras=kwargs.get('extras'),
+            video_img_urls=kwargs.get('video_img_urls', []),
+            generate_prompt=generate_base_prompt,
         )
-
-        # ⛳ 组装 content 数组，支持 text + image_url 混合
-        content: List[dict] = [{"type": "text", "text": content_text}]
-        video_img_urls = kwargs.get('video_img_urls', [])
-
-        for url in video_img_urls:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": url,
-                    "detail": "auto"
-                }
-            })
-
-        #  正确格式：整体包在一个 message 里，role + content array
-        messages = [{
-            "role": "user",
-            "content": content
-        }]
-
-        return messages
 
     def list_models(self):
         return self.client.models.list()
@@ -241,11 +213,7 @@ class UniversalGPT(GPT):
         return len(json.dumps(messages, ensure_ascii=False).encode("utf-8"))
 
     def _build_merge_messages(self, partials: list) -> list:
-        merge_text = MERGE_PROMPT + "\n\n" + "\n\n---\n\n".join(partials)
-        return [{
-            "role": "user",
-            "content": [{"type": "text", "text": merge_text}]
-        }]
+        return message_payloads.build_merge_messages(partials, MERGE_PROMPT)
 
     def _build_polished_transcript_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
         section_guidance = self._polished_transcript_section_guidance(segments)
@@ -253,41 +221,33 @@ class UniversalGPT(GPT):
             kwargs.get("language"),
             segments,
         )
-        prompt = POLISHED_TRANSCRIPT_PROMPT.format(
-            video_title=kwargs.get("title"),
+        return message_payloads.build_polished_transcript_messages(
             segment_text=self._build_segment_text(segments),
+            title=kwargs.get("title"),
             tags=kwargs.get("tags"),
             section_guidance=section_guidance,
             language_guidance=language_guidance,
+            prompt_template=POLISHED_TRANSCRIPT_PROMPT,
         )
-        return [{
-            "role": "user",
-            "content": [{"type": "text", "text": prompt}]
-        }]
 
     def _build_polished_transcript_chunk_messages(self, segments: List[TranscriptSegment], **kwargs) -> list:
-        prompt = POLISHED_TRANSCRIPT_CHUNK_PROMPT.format(
-            video_title=kwargs.get("title"),
+        return message_payloads.build_polished_transcript_chunk_messages(
             segment_text=self._build_segment_text(segments),
+            title=kwargs.get("title"),
             tags=kwargs.get("tags"),
             language_guidance=self._polished_transcript_language_guidance(
                 kwargs.get("language"),
                 segments,
             ),
+            prompt_template=POLISHED_TRANSCRIPT_CHUNK_PROMPT,
         )
-        return [{
-            "role": "user",
-            "content": [{"type": "text", "text": prompt}]
-        }]
 
     def _build_polished_transcript_merge_messages(self, partials: list, language: str | None = None) -> list:
-        merge_text = POLISHED_TRANSCRIPT_MERGE_PROMPT.format(
-            language_guidance=self._polished_transcript_language_guidance(language, []),
-        ) + "\n\n" + "\n\n---\n\n".join(partials)
-        return [{
-            "role": "user",
-            "content": [{"type": "text", "text": merge_text}]
-        }]
+        return message_payloads.build_polished_transcript_merge_messages(
+            partials,
+            self._polished_transcript_language_guidance(language, []),
+            POLISHED_TRANSCRIPT_MERGE_PROMPT,
+        )
 
     def _build_polished_transcript_repair_messages(
         self,
@@ -295,103 +255,45 @@ class UniversalGPT(GPT):
         draft_text: str,
         **kwargs,
     ) -> list:
-        prompt = POLISHED_TRANSCRIPT_REPAIR_PROMPT.format(
-            video_title=kwargs.get("title"),
+        return message_payloads.build_polished_transcript_repair_messages(
             segment_text=self._build_segment_text(segments),
+            title=kwargs.get("title"),
             tags=kwargs.get("tags"),
             draft_text=draft_text,
             language_guidance=self._polished_transcript_language_guidance(
                 kwargs.get("language"),
                 segments,
             ),
+            prompt_template=POLISHED_TRANSCRIPT_REPAIR_PROMPT,
         )
-        return [{
-            "role": "user",
-            "content": [{"type": "text", "text": prompt}]
-        }]
 
     def _checkpoint_path(self, checkpoint_key: str) -> Path:
-        safe_key = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in checkpoint_key)
-        return self.checkpoint_dir / f"{safe_key}.gpt.checkpoint.json"
+        return checkpoint_path(self.checkpoint_dir, checkpoint_key)
 
     def _build_source_signature(self, source: GPTSource) -> str:
-        payload = {
-            "model": self.model,
-            "temperature": self.temperature,
-            "max_request_bytes": self.max_request_bytes,
-            "title": source.title,
-            "tags": source.tags,
-            "format": source._format,
-            "style": source.style,
-            "extras": source.extras,
-            "video_img_urls": source.video_img_urls or [],
-            "segments": [
-                {
-                    "start": getattr(seg, "start", None),
-                    "end": getattr(seg, "end", None),
-                    "text": getattr(seg, "text", "")
-                }
-                for seg in source.segment
-            ],
-        }
-        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        return source_signature.build_source_signature(
+            source,
+            model=self.model,
+            temperature=self.temperature,
+            max_request_bytes=self.max_request_bytes,
+        )
 
     def _polished_transcript_section_guidance(self, segments: List[TranscriptSegment]) -> str:
-        text_length = sum(len((getattr(seg, "text", "") or "").strip()) for seg in segments)
-        if text_length >= 12000:
-            return "6-12 个 `##` 章节"
-        if text_length >= 5000:
-            return "4-8 个 `##` 章节"
-        return "3-6 个 `##` 章节"
+        return polished_transcript.polished_transcript_section_guidance(segments)
 
     @staticmethod
     def _polished_transcript_language_guidance(language: str | None, segments: List[TranscriptSegment]) -> str:
-        normalized_language = (language or "").lower()
-        if normalized_language.startswith("zh"):
-            return "如果原字幕本身是中文，就按现有方式输出自然、完整的简体中文文字稿，不需要双语对照。 "
-
-        sample_text = " ".join((getattr(segment, "text", "") or "").strip() for segment in segments[:5]).strip()
-        has_chinese = any("\u4e00" <= char <= "\u9fff" for char in sample_text)
-        if not normalized_language and has_chinese:
-            return "如果原字幕本身是中文，就按现有方式输出自然、完整的简体中文文字稿，不需要双语对照。 "
-
-        return (
-            "如果原字幕主体不是中文，请输出双语文字稿：先输出英文原段落，下一自然段紧跟对应的中文翻译；"
-            "保持一段英文、一段中文交替出现，不要把英文和中文写在同一段里，也不要只保留中文摘要。"
-            "直接从正文开始，不要添加任何导语、编者按、说明信息或标签；"
-            "不要写“以下是整理后的双语文字稿”“英文原文：”“中文翻译：”之类的字样。"
-        )
+        return polished_transcript.polished_transcript_language_guidance(language, segments)
 
     @staticmethod
     def _strip_markdown_for_length(text: str) -> str:
-        cleaned = text or ""
-        replacements = (
-            ("**", ""),
-            ("### ", ""),
-            ("## ", ""),
-            ("# ", ""),
-            ("`", ""),
-            ("> ", ""),
-            ("-", " "),
-            ("*", ""),
-        )
-        for old, new in replacements:
-            cleaned = cleaned.replace(old, new)
-        return " ".join(cleaned.split())
+        return polished_transcript.strip_markdown_for_length(text)
 
     def _source_text_length(self, segments: List[TranscriptSegment]) -> int:
-        return sum(len((getattr(seg, "text", "") or "").strip()) for seg in segments)
+        return polished_transcript.source_text_length(segments)
 
     def _needs_polished_transcript_repair(self, segments: List[TranscriptSegment], draft_text: str) -> bool:
-        source_length = self._source_text_length(segments)
-        if source_length <= 0:
-            return False
-
-        output_length = len(self._strip_markdown_for_length(draft_text))
-        ratio = output_length / source_length
-        threshold = 0.72 if source_length < 12000 else 0.82
-        return ratio < threshold
+        return polished_transcript.needs_polished_transcript_repair(segments, draft_text)
 
     def _repair_polished_transcript(self, source: GPTSource, draft_text: str) -> str:
         messages = self._build_polished_transcript_repair_messages(
@@ -415,34 +317,17 @@ class UniversalGPT(GPT):
         title: str,
         tags,
     ):
-        budget = max(500, self.polished_transcript_max_source_chars)
-        coarse_groups: List[List[TranscriptSegment]] = []
-        current_group: List[TranscriptSegment] = []
-        current_chars = 0
-
-        for segment in segments:
-            segment_text = (getattr(segment, "text", "") or "").strip()
-            segment_chars = len(segment_text)
-
-            if current_group and current_chars + segment_chars > budget:
-                coarse_groups.append(current_group)
-                current_group = []
-                current_chars = 0
-
-            current_group.append(segment)
-            current_chars += segment_chars
-
-        if current_group:
-            coarse_groups.append(current_group)
-
         def message_builder(group_segments, _image_urls=None, **kwargs):
             return self._build_polished_transcript_chunk_messages(group_segments, **kwargs)
 
         byte_chunker = RequestChunker(message_builder, self.max_request_bytes, self._estimate_messages_bytes)
-        chunks = []
-        for group in coarse_groups:
-            chunks.extend(byte_chunker.chunk(group, [], title=title, tags=tags))
-        return chunks
+        return polished_transcript.split_polished_transcript_segments(
+            segments,
+            self.polished_transcript_max_source_chars,
+            byte_chunker,
+            title=title,
+            tags=tags,
+        )
 
     def _repair_polished_transcript_segments(
         self,
@@ -484,44 +369,16 @@ class UniversalGPT(GPT):
 
     @staticmethod
     def _stitch_polished_transcript_partials(partials: List[str]) -> str:
-        cleaned = [part.strip() for part in partials if part and part.strip()]
-        if not cleaned:
-            return ""
-        stitched = "\n\n".join(cleaned)
-        stitched = stitched.replace("\r\n", "\n")
-        while "\n\n\n" in stitched:
-            stitched = stitched.replace("\n\n\n", "\n\n")
-        return stitched.strip()
+        return polished_transcript.stitch_polished_transcript_partials(partials)
 
     def _load_checkpoint(self, checkpoint_key: str, source_signature: str) -> dict | None:
-        path = self._checkpoint_path(checkpoint_key)
-        if not path.exists():
-            return None
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("source_signature") != source_signature:
-                path.unlink(missing_ok=True)
-                return None
-            return data
-        except Exception:
-            path.unlink(missing_ok=True)
-            return None
+        return load_checkpoint(self.checkpoint_dir, checkpoint_key, source_signature)
 
     def _save_checkpoint(self, checkpoint_key: str, source_signature: str, partials: list, phase: str) -> None:
-        path = self._checkpoint_path(checkpoint_key)
-        data = {
-            "version": 1,
-            "source_signature": source_signature,
-            "phase": phase,
-            "partials": partials,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        tmp_path = path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
+        save_checkpoint(self.checkpoint_dir, checkpoint_key, source_signature, partials, phase)
 
     def _clear_checkpoint(self, checkpoint_key: str) -> None:
-        self._checkpoint_path(checkpoint_key).unlink(missing_ok=True)
+        clear_checkpoint(self.checkpoint_dir, checkpoint_key)
 
     @staticmethod
     def _is_insufficient_quota_error(exc: Exception) -> bool:
@@ -534,27 +391,7 @@ class UniversalGPT(GPT):
 
     @staticmethod
     def _is_retryable_error(exc: Exception) -> bool:
-        raw = str(exc).lower()
-        retryable_tokens = (
-            "error code: 524",
-            "bad_response_status_code",
-            "timed out",
-            "timeout",
-            "rate limit",
-            "error code: 429",
-            "error code: 500",
-            "error code: 502",
-            "error code: 503",
-            "error code: 504",
-            "apiconnectionerror",
-            "connection error",
-            "service unavailable",
-        )
-        if any(token in raw for token in retryable_tokens):
-            return True
-
-        status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
-        return status in {408, 409, 429, 500, 502, 503, 504, 524}
+        return is_retryable_error(exc)
 
     def _chat_completion_create(self, messages: list):
         cache_key = self._llm_cache_key(messages)
@@ -607,7 +444,7 @@ class UniversalGPT(GPT):
                         exc,
                     )
                     raise
-                sleep_seconds = self._retry_base_backoff * (2 ** attempt)
+                sleep_seconds = retry_backoff_seconds(self._retry_base_backoff, attempt)
                 logger.warning(
                     "LLM provider retrying: key=%s attempt=%d/%d backoff_seconds=%.2f error=%s",
                     self._cache_key_preview(cache_key),

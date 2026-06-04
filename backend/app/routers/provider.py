@@ -1,14 +1,15 @@
+import logging
 from typing import Optional
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.exceptions.provider import ProviderError
-from app.models.model_config import ModelConfig
 from app.services.model import ModelService
 from app.utils.response import ResponseWrapper as R
 from app.services.provider import ProviderService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 #  新增 type 字段
 class ProviderRequest(BaseModel):
@@ -83,7 +84,7 @@ def update_provider(data: ProviderUpdateRequest):
         )
         return R.success(msg='更新模型供应商成功',data={'id': provider_id})
     except Exception as e:
-        print(e)
+        logger.exception("更新模型供应商失败")
         return R.error(msg=str(e))
 
 @router.post('/connect_test')

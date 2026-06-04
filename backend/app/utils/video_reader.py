@@ -1,5 +1,3 @@
-import base64
-import hashlib
 import os
 import re
 import subprocess
@@ -7,6 +5,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import ffmpeg
 from PIL import Image, ImageDraw, ImageFont
 
+from app.utils.video_frame_dedupe import (
+    extract_time_from_frame_filename,
+    group_frame_paths,
+    select_unique_adjacent_frames,
+)
+from app.utils.video_reader_files import (
+    calculate_file_md5,
+    collect_existing_frame_paths,
+    encode_jpeg_files_to_data_urls,
+    remove_file_paths,
+    remove_files_with_prefix,
+)
 from app.utils.logger import get_logger
 from app.utils.path_helper import get_app_dir
 
@@ -32,16 +42,12 @@ class VideoReader:
         self.save_quality = save_quality
         self.frame_dir = frame_dir or get_app_dir("output_frames")
         self.grid_dir = grid_dir or get_app_dir("grid_output")
-        print(f"视频路径：{video_path}",self.frame_dir,self.grid_dir)
+        logger.debug("视频路径：%s %s %s", video_path, self.frame_dir, self.grid_dir)
         self.font_path = font_path
 
     @staticmethod
     def _calculate_file_md5(file_path: str) -> str:
-        hasher = hashlib.md5()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+        return calculate_file_md5(file_path)
 
     def format_time(self, seconds: float) -> str:
         mm = int(seconds // 60)
@@ -49,11 +55,7 @@ class VideoReader:
         return f"{mm:02d}_{ss:02d}"
 
     def extract_time_from_filename(self, filename: str) -> float:
-        match = re.search(r"frame_(\d{2})_(\d{2})\.jpg", filename)
-        if match:
-            mm, ss = map(int, match.groups())
-            return mm * 60 + ss
-        return float('inf')
+        return extract_time_from_frame_filename(filename)
 
     def _extract_single_frame(self, ts: int) -> str | None:
         """提取单帧，返回输出路径或 None（失败时）。"""
@@ -84,21 +86,16 @@ class VideoReader:
                     frame_results[ts] = future.result()
 
             # 按时间戳顺序整理结果，并进行去重
-            image_paths = []
-            last_hash = None
-            for ts in timestamps:
-                output_path = frame_results.get(ts)
-                if not output_path or not os.path.exists(output_path):
-                    continue
+            image_paths = collect_existing_frame_paths(timestamps, frame_results)
 
-                if self.dedupe_enabled:
-                    frame_hash = self._calculate_file_md5(output_path)
-                    if frame_hash == last_hash:
-                        os.remove(output_path)
-                        continue
-                    last_hash = frame_hash
+            if self.dedupe_enabled:
+                dedupe_result = select_unique_adjacent_frames(
+                    image_paths,
+                    hash_file=self._calculate_file_md5,
+                )
+                remove_file_paths(dedupe_result.duplicate_paths)
+                image_paths = dedupe_result.kept_paths
 
-                image_paths.append(output_path)
             return image_paths
         except Exception as e:
             logger.error(f"分割帧发生错误：{str(e)}")
@@ -107,9 +104,7 @@ class VideoReader:
     def group_images(self) -> list[list[str]]:
         image_files = [os.path.join(self.frame_dir, f) for f in os.listdir(self.frame_dir) if
                        f.startswith("frame_") and f.endswith(".jpg")]
-        image_files.sort(key=lambda f: self.extract_time_from_filename(os.path.basename(f)))
-        group_size = self.grid_size[0] * self.grid_size[1]
-        return [image_files[i:i + group_size] for i in range(0, len(image_files), group_size)]
+        return group_frame_paths(image_files, self.grid_size)
 
     def concat_images(self, image_paths: list[str], name: str) -> str:
         os.makedirs(self.grid_dir, exist_ok=True)
@@ -137,32 +132,23 @@ class VideoReader:
         return save_path
 
     def encode_images_to_base64(self, image_paths: list[str]) -> list[str]:
-        base64_images = []
-        for path in image_paths:
-            with open(path, "rb") as img_file:
-                encoded_string = base64.b64encode(img_file.read()).decode("utf-8")
-                base64_images.append(f"data:image/jpeg;base64,{encoded_string}")
-        return base64_images
+        return encode_jpeg_files_to_data_urls(image_paths)
 
     def run(self)->list[str]:
         logger.info("开始提取视频帧...")
         try:
             # 确保目录存在
-            print(self.frame_dir,self.grid_dir)
+            logger.debug("帧目录：%s，网格目录：%s", self.frame_dir, self.grid_dir)
             os.makedirs(self.frame_dir, exist_ok=True)
             os.makedirs(self.grid_dir, exist_ok=True)
             #清空帧文件夹
-            for file in os.listdir(self.frame_dir):
-                if file.startswith("frame_"):
-                    os.remove(os.path.join(self.frame_dir, file))
-            print(self.frame_dir,self.grid_dir)
+            remove_files_with_prefix(self.frame_dir, "frame_")
+            logger.debug("已清空帧目录：%s，网格目录：%s", self.frame_dir, self.grid_dir)
             #清空网格文件夹
-            for file in os.listdir(self.grid_dir):
-                if file.startswith("grid_"):
-                    os.remove(os.path.join(self.grid_dir, file))
-            print(self.frame_dir,self.grid_dir)
+            remove_files_with_prefix(self.grid_dir, "grid_")
+            logger.debug("已清空网格目录：%s，帧目录：%s", self.grid_dir, self.frame_dir)
             self.extract_frames()
-            print("2#3",self.frame_dir,self.grid_dir)
+            logger.debug("帧提取完成：%s，网格目录：%s", self.frame_dir, self.grid_dir)
             logger.info("开始拼接网格图...")
             image_paths = []
             groups = self.group_images()
@@ -179,5 +165,3 @@ class VideoReader:
         except Exception as e:
             logger.error(f"发生错误：{str(e)}")
             raise ValueError("视频处理失败")
-
-

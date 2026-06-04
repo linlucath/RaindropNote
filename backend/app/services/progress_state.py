@@ -4,13 +4,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from app.enmus.task_status_enums import TaskStatus
-
-
-TERMINAL_TASK_STATUSES = {
-    TaskStatus.SUCCESS.value,
-    TaskStatus.FAILED.value,
-    TaskStatus.CANCELLED.value,
-}
+from app.services.task_runtime import TERMINAL_TASK_STATUSES
 
 
 def _status_file_path(task_id: str, output_dir: Path) -> Path:

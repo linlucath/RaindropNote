@@ -1,15 +1,18 @@
+import logging
 import os
 import subprocess
 from abc import ABC
 from typing import Optional
 
 from app.downloaders.base import Downloader
+from app.downloaders.local_paths import resolve_local_video_path
 from app.enmus.note_enums import DownloadQuality
 from app.models.audio_model import AudioDownloadResult
-import os
-import subprocess
 
 from app.utils.video_helper import save_cover_to_static
+
+
+logger = logging.getLogger(__name__)
 
 
 class LocalDownloader(Downloader, ABC):
@@ -89,10 +92,7 @@ class LocalDownloader(Downloader, ABC):
         """
         处理本地文件路径，返回视频文件路径
         """
-        if video_url.startswith('/uploads'):
-            project_root = os.getcwd()
-            video_url = os.path.join(project_root, video_url.lstrip('/'))
-            video_url = os.path.normpath(video_url)
+        video_url = resolve_local_video_path(video_url)
 
         if not os.path.exists(video_url):
             raise FileNotFoundError()
@@ -107,22 +107,19 @@ class LocalDownloader(Downloader, ABC):
         """
         处理本地文件路径，返回音频元信息
         """
-        if video_url.startswith('/uploads'):
-            project_root = os.getcwd()
-            video_url = os.path.join(project_root, video_url.lstrip('/'))
-            video_url = os.path.normpath(video_url)
+        video_url = resolve_local_video_path(video_url)
 
         if not os.path.exists(video_url):
             raise FileNotFoundError(f"本地文件不存在: {video_url}")
 
         file_name = os.path.basename(video_url)
         title, _ = os.path.splitext(file_name)
-        print(title, file_name,video_url)
+        logger.debug("Local video metadata: title=%s, file_name=%s, path=%s", title, file_name, video_url)
         file_path=self.convert_to_mp3(video_url)
         cover_path = self.extract_cover(video_url)
         cover_url = save_cover_to_static(cover_path)
 
-        print('file——path',file_path)
+        logger.debug("Local audio file path: %s", file_path)
         return AudioDownloadResult(
             file_path=file_path,
             title=title,

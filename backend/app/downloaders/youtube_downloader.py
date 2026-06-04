@@ -136,7 +136,5 @@ class YoutubeDownloader(Downloader, ABC):
 
         video_id = extract_video_id(video_url, "youtube")
         fetcher = YouTubeSubtitleFetcher()
-        print(
-            f"尝试获取字幕，video_id={video_id}, langs={langs}"
-        )
+        logger.debug("尝试获取字幕，video_id=%s, langs=%s", video_id, langs)
         return fetcher.fetch_subtitles(video_id, langs)

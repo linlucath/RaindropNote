@@ -5,6 +5,8 @@ from typing import Any
 
 import requests
 
+from app.services.bilibili_api_client import BilibiliApiClient
+
 DYNAMICS_API_URL = 'https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/all'
 DYNAMICS_FEATURES = (
     'itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote,decorationCard,'
@@ -15,25 +17,24 @@ DYNAMICS_FEATURES = (
 @dataclass
 class BilibiliDynamicService:
     cookie_getter: Any
+    request_get: Any | None = None
+
+    def _request_get(self, url: str, **kwargs: Any) -> Any:
+        return requests.get(url, **kwargs)
+
+    def _api_client(self) -> BilibiliApiClient:
+        return BilibiliApiClient(
+            cookie_getter=self.cookie_getter,
+            referer='https://t.bilibili.com/',
+            origin='https://www.bilibili.com',
+            request_get=self.request_get or self._request_get,
+        )
 
     def _get_cookie(self) -> str:
-        cookie = (self.cookie_getter('bilibili') or '').strip()
-        if not cookie:
-            raise ValueError('请先在设置页填写 Bilibili Cookie')
-        return cookie
+        return self._api_client().get_cookie()
 
     def _build_headers(self, cookie: str) -> dict[str, str]:
-        return {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/124.0.0.0 Safari/537.36'
-            ),
-            'Referer': 'https://t.bilibili.com/',
-            'Origin': 'https://www.bilibili.com',
-            'Accept': 'application/json, text/plain, */*',
-            'Cookie': cookie,
-        }
+        return self._api_client().build_headers(cookie)
 
     def _normalize_video_dynamic(self, item: dict[str, Any]) -> dict[str, str] | None:
         if item.get('type') != 'DYNAMIC_TYPE_AV':
@@ -85,19 +86,12 @@ class BilibiliDynamicService:
         if offset:
             params['offset'] = offset
 
-        response = requests.get(
+        payload = self._api_client().request_json(
             DYNAMICS_API_URL,
             params=params,
-            headers=self._build_headers(cookie),
-            timeout=15,
+            fallback_error='获取关注动态失败',
+            cookie=cookie,
         )
-        response.raise_for_status()
-        payload = response.json()
-        code = payload.get('code', -1)
-        if code != 0:
-            if code in {-101, 22007, 22115}:
-                raise ValueError('Bilibili Cookie 已失效，请重新更新')
-            raise ValueError(payload.get('message') or payload.get('msg') or '获取关注动态失败')
         return payload.get('data') or {}
 
     def get_video_dynamics(self, page_size: int, offset: str | None) -> dict[str, Any]:

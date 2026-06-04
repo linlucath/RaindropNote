@@ -1,41 +1,34 @@
-import json
 import logging
 import os
-import re
-import requests
-from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, Tuple, Union, Any
 
-from fastapi import HTTPException
 from pydantic import HttpUrl
 from dotenv import load_dotenv
 
 from app.downloaders.base import Downloader
-from app.downloaders.bilibili_downloader import BilibiliDownloader
-from app.downloaders.douyin_downloader import DouyinDownloader
-from app.downloaders.youtube_downloader import YoutubeDownloader
 from app.db.video_task_dao import delete_task_by_task_id, delete_task_by_video, insert_video_task
-from app.enmus.exception import NoteErrorEnum, ProviderErrorEnum
+from app.enmus.exception import NoteErrorEnum
 from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
-from app.exceptions.provider import ProviderError
 from app.gpt.base import GPT
-from app.gpt.gpt_factory import GPTFactory
-from app.models.gpt_model import GPTSource
-from app.models.model_config import ModelConfig
 from app.models.notes_model import AudioDownloadResult, NoteResult
-from app.models.transcriber_model import TranscriptResult, TranscriptSegment
+from app.models.transcriber_model import TranscriptResult
 from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.progress_state import cancel_task, is_task_cancel_requested, write_task_status
-from app.services.provider import ProviderService
-from app.utils.note_helper import replace_content_markers, prepend_source_link
+from app.services import note_gpt_provider
+from app.services import note_generation_plan
+from app.services import note_llm_markdown
+from app.services import note_markdown_postprocess
+from app.services import note_media_download
+from app.services import note_result_payload
+from app.services import note_transcript_source
+from app.services import subtitle_audio_meta
+from app.services import subtitle_transcripts
+from app.services.task_runtime import default_note_output_dir
+from app.services import transcript_markdown
 from app.utils.screenshot_marker import extract_screenshot_timestamps
-from app.utils.status_code import StatusCode
-from app.utils.video_helper import generate_screenshot
-from app.utils.video_reader import VideoReader
-from app.utils.url_parser import extract_video_id
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -48,7 +41,7 @@ BACKEND_PORT = os.getenv("BACKEND_PORT", "8483")
 BACKEND_BASE_URL = f"{API_BASE_URL}:{BACKEND_PORT}"
 
 # 输出目录（用于缓存音频、转写、Markdown 文件，以及存储截图）
-NOTE_OUTPUT_DIR = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+NOTE_OUTPUT_DIR = default_note_output_dir()
 NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_OUTPUT_DIR = os.getenv("OUT_DIR", "./static/screenshots")
 # 图片基础 URL（用于生成 Markdown 中的图片链接，需前端静态目录对应）
@@ -69,7 +62,7 @@ class NoteGenerator:
     以及将任务信息写入状态文件与数据库等功能。
     """
     SUBTITLE_REQUIRED_MESSAGE = "当前仅支持平台字幕生成，未找到可用字幕文件。"
-    SUBTITLE_TRANSCRIPT_SOURCES = {"bilibili_subtitle", "youtube_transcript_api"}
+    SUBTITLE_TRANSCRIPT_SOURCES = subtitle_transcripts.SUBTITLE_TRANSCRIPT_SOURCES
 
     def __init__(self):
         self.video_path: Optional[Path] = None
@@ -122,8 +115,7 @@ class NoteGenerator:
         """
         if grid_size is None:
             grid_size = []
-        is_transcript_only = mode == "transcript"
-        is_polished_transcript = mode == "polished_transcript"
+        mode_branch = note_generation_plan.prepare_mode_branch(mode)
 
         try:
             logger.info(f"开始生成笔记 (task_id={task_id})")
@@ -136,67 +128,41 @@ class NoteGenerator:
             self._cancel_if_requested(task_id)
             gpt = None
 
-            # 缓存文件路径
-            audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
-            transcript_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_transcript.json"
-            markdown_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_markdown.md"
+            cache_paths = note_generation_plan.build_cache_paths(NOTE_OUTPUT_DIR, task_id)
             # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
-            transcript = None
-
-            # 尝试读取缓存
-            if transcript_cache_file.exists():
-                logger.info(f"检测到转写缓存 ({transcript_cache_file})，尝试读取")
-                try:
-                    transcript = self._load_transcript_cache(
-                        transcript_cache_file,
-                    )
-                    if transcript:
-                        logger.info(f"已从缓存加载转写结果，共 {len(transcript.segments)} 段")
-                except Exception as e:
-                    logger.warning(f"加载转写缓存失败: {e}")
-
-            # 缓存没有，尝试获取平台字幕
-            if transcript is None:
-                logger.info("尝试获取平台字幕（优先于音频下载）...")
-                try:
-                    transcript = downloader.download_subtitles(video_url)
-                    if transcript and transcript.segments:
-                        logger.info(f"成功获取平台字幕，共 {len(transcript.segments)} 段")
-                        transcript_cache_file.write_text(
-                            json.dumps(asdict(transcript), ensure_ascii=False, indent=2),
-                            encoding="utf-8",
-                        )
-                    else:
-                        transcript = None
-                        logger.info("平台无可用字幕")
-                except Exception as e:
-                    logger.warning(f"获取平台字幕失败: {e}")
-                    transcript = None
+            transcript = note_transcript_source.load_or_download_platform_transcript(
+                transcript_cache_file=cache_paths.transcript_cache_file,
+                downloader=downloader,
+                video_url=video_url,
+                log=logger,
+            )
 
             # 2. 下载音频/视频
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
             if not has_transcript:
                 raise RuntimeError(self.SUBTITLE_REQUIRED_MESSAGE)
+            self._cancel_if_requested(task_id)
 
-            need_full_download = screenshot or video_understanding
-            if platform == "youtube" and not need_full_download:
+            media_plan = note_generation_plan.prepare_media_source(
+                platform=platform,
+                screenshot=screenshot,
+                video_understanding=video_understanding,
+            )
+            if media_plan.use_subtitle_only_audio_meta:
                 logger.info("YouTube 已获取字幕，跳过媒体探测，直接构造字幕元信息")
                 audio_meta = self._build_subtitle_only_audio_meta(
                     video_url=video_url,
                     platform=platform,
                     transcript=transcript,
                 )
-                audio_cache_file.write_text(
-                    json.dumps(asdict(audio_meta), ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                note_generation_plan.write_audio_cache(cache_paths.audio_cache_file, audio_meta)
             else:
                 audio_meta = self._download_media(
                     downloader=downloader,
                     video_url=video_url,
                     quality=quality,
-                    audio_cache_file=audio_cache_file,
+                    audio_cache_file=cache_paths.audio_cache_file,
                     status_phase=TaskStatus.DOWNLOADING,
                     platform=platform,
                     output_path=output_path,
@@ -204,14 +170,13 @@ class NoteGenerator:
                     video_understanding=video_understanding,
                     video_interval=video_interval,
                     grid_size=grid_size,
-                    skip_download=not need_full_download,
+                    skip_download=media_plan.skip_download,
                 )
             self._cancel_if_requested(task_id)
 
-            if is_transcript_only:
+            if mode_branch.is_transcript_only:
                 markdown = self._build_transcript_markdown(audio_meta=audio_meta, transcript=transcript)
-                markdown_cache_file.write_text(markdown, encoding="utf-8")
-                markdown = prepend_source_link(markdown, str(video_url))
+                cache_paths.markdown_cache_file.write_text(markdown, encoding="utf-8")
 
                 self._cancel_if_requested(task_id)
                 self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
@@ -219,18 +184,22 @@ class NoteGenerator:
 
                 self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
                 logger.info(f"文字稿生成成功 (task_id={task_id})")
-                return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+                return self._build_note_result(
+                    markdown=markdown,
+                    video_url=video_url,
+                    transcript=transcript,
+                    audio_meta=audio_meta,
+                )
 
-            if is_polished_transcript:
+            if mode_branch.is_polished_transcript:
                 gpt = self._get_gpt(model_name, provider_id)
                 markdown = self._polish_transcript(
                     audio_meta=audio_meta,
                     transcript=transcript,
                     gpt=gpt,
-                    markdown_cache_file=markdown_cache_file,
+                    markdown_cache_file=cache_paths.markdown_cache_file,
                 )
                 self._cancel_if_requested(task_id)
-                markdown = prepend_source_link(markdown, str(video_url))
 
                 self._cancel_if_requested(task_id)
                 self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
@@ -238,7 +207,12 @@ class NoteGenerator:
 
                 self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
                 logger.info(f"校对文字稿生成成功 (task_id={task_id})")
-                return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+                return self._build_note_result(
+                    markdown=markdown,
+                    video_url=video_url,
+                    transcript=transcript,
+                    audio_meta=audio_meta,
+                )
 
             # 3. GPT 总结
             gpt = self._get_gpt(model_name, provider_id)
@@ -246,7 +220,7 @@ class NoteGenerator:
                 audio_meta=audio_meta,
                 transcript=transcript,
                 gpt=gpt,
-                markdown_cache_file=markdown_cache_file,
+                markdown_cache_file=cache_paths.markdown_cache_file,
                 link=link,
                 screenshot=screenshot,
                 formats=_format or [],
@@ -266,8 +240,6 @@ class NoteGenerator:
                     platform=platform,
                 )
 
-            markdown = prepend_source_link(markdown, str(video_url))
-
             # 5. 保存记录到数据库
             self._cancel_if_requested(task_id)
             self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
@@ -276,7 +248,12 @@ class NoteGenerator:
             # 6. 完成
             self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
             logger.info(f"笔记生成成功 (task_id={task_id})")
-            return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+            return self._build_note_result(
+                markdown=markdown,
+                video_url=video_url,
+                transcript=transcript,
+                audio_meta=audio_meta,
+            )
 
         except TaskCancelledError as exc:
             logger.info(f"任务已取消 (task_id={task_id})：{exc}")
@@ -288,29 +265,19 @@ class NoteGenerator:
 
     @staticmethod
     def _is_subtitle_transcript_data(data: dict) -> bool:
-        raw = data.get("raw") or {}
-        return isinstance(raw, dict) and raw.get("source") in NoteGenerator.SUBTITLE_TRANSCRIPT_SOURCES
+        return subtitle_transcripts.is_subtitle_transcript_data(data)
 
     @staticmethod
     def _is_subtitle_transcript_result(transcript: TranscriptResult) -> bool:
-        raw = transcript.raw or {}
-        return isinstance(raw, dict) and raw.get("source") in NoteGenerator.SUBTITLE_TRANSCRIPT_SOURCES
+        return subtitle_transcripts.is_subtitle_transcript_result(transcript)
 
     @staticmethod
     def _load_transcript_cache(
         transcript_cache_file: Path,
     ) -> Optional[TranscriptResult]:
-        data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
-        if not NoteGenerator._is_subtitle_transcript_data(data):
-            logger.info(f"转写缓存不是平台字幕来源，忽略旧缓存 ({transcript_cache_file})")
-            return None
-
-        segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-        return TranscriptResult(
-            language=data.get("language"),
-            full_text=data["full_text"],
-            segments=segments,
-            raw=data.get("raw"),
+        return subtitle_transcripts.load_subtitle_transcript_cache(
+            transcript_cache_file,
+            log=logger,
         )
 
     @staticmethod
@@ -343,86 +310,37 @@ class NoteGenerator:
         :param provider_id: 供应商 ID
         :return: GPT 实例
         """
-        provider = ProviderService.get_provider_by_id(provider_id)
-        if not provider:
-            logger.error(f"[get_gpt] 未找到模型供应商: provider_id={provider_id}")
-            raise ProviderError(code=ProviderErrorEnum.NOT_FOUND,message=ProviderErrorEnum.NOT_FOUND.message)
-        logger.info(f"创建 GPT 实例 {provider_id}")
-        config = ModelConfig(
-            api_key=provider["api_key"],
-            base_url=provider["base_url"],
-            model_name=model_name,
-            provider=provider["type"],
-            name=provider["name"],
-        )
-        return GPTFactory().from_config(config)
+        return note_gpt_provider.build_gpt(model_name, provider_id, log=logger)
 
     @staticmethod
     def _format_timestamp(seconds: float) -> str:
-        total_seconds = int(seconds or 0)
-        minutes, secs = divmod(total_seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-        if hours:
-            return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-        return f"{minutes:02d}:{secs:02d}"
+        return transcript_markdown.format_timestamp(seconds)
 
     @staticmethod
     def _simplify_chinese(text: str) -> str:
-        if not text:
-            return ""
-
-        try:
-            from opencc import OpenCC
-            return OpenCC("t2s").convert(text)
-        except Exception:
-            phrase_map = {
-                "視頻": "视频",
-            }
-            for source, target in phrase_map.items():
-                text = text.replace(source, target)
-            fallback_map = str.maketrans({
-                "這": "这", "個": "个", "視": "视", "頻": "频",
-                "學": "学", "習": "习", "後": "后", "還": "还", "補": "补",
-                "觀": "观", "點": "点", "測": "测", "試": "试", "裏": "里",
-                "裡": "里", "與": "与", "為": "为", "會": "会", "說": "说",
-                "講": "讲", "讓": "让", "對": "对", "開": "开", "關": "关",
-                "題": "题", "體": "体", "現": "现", "實": "实", "應": "应",
-                "產": "产", "業": "业", "經": "经", "營": "营", "專": "专",
-                "區": "区", "並": "并", "從": "从", "變": "变", "種": "种",
-                "時": "时", "間": "间", "線": "线", "錄": "录", "轉": "转",
-                "寫": "写", "長": "长", "標": "标", "簡": "简", "體": "体",
-            })
-            return text.translate(fallback_map)
+        return transcript_markdown.simplify_chinese(text)
 
     @staticmethod
     def _normalize_transcript_text(text: str) -> str:
-        simplified = NoteGenerator._simplify_chinese(text.strip())
-        simplified = re.sub(r"\s+", " ", simplified)
-        simplified = re.sub(r"(?<=[\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])", "", simplified)
-        return simplified
+        return transcript_markdown.normalize_transcript_text(text)
 
     @staticmethod
     def _build_transcript_markdown(audio_meta: AudioDownloadResult, transcript: TranscriptResult) -> str:
-        title = NoteGenerator._normalize_transcript_text(audio_meta.title or "未命名视频")
-        segment_texts = [
-            NoteGenerator._normalize_transcript_text(segment.text)
-            for segment in transcript.segments
-            if segment.text and segment.text.strip()
-        ]
-        readable_text = NoteGenerator._normalize_transcript_text("".join(segment_texts))
-        timestamp_lines = [
-            f"[{NoteGenerator._format_timestamp(segment.start)}] {NoteGenerator._normalize_transcript_text(segment.text)}"
-            for segment in transcript.segments
-            if segment.text and segment.text.strip()
-        ]
+        return transcript_markdown.build_transcript_markdown(audio_meta, transcript)
 
-        return "\n\n".join([
-            f"# {title}",
-            "## 简体中文文字稿",
-            readable_text or NoteGenerator._normalize_transcript_text(transcript.full_text or ""),
-            "## 带时间戳文字稿",
-            "\n".join(timestamp_lines),
-        ]).strip()
+    @staticmethod
+    def _build_note_result(
+        markdown: str,
+        video_url: Union[str, HttpUrl],
+        transcript: TranscriptResult,
+        audio_meta: AudioDownloadResult,
+    ) -> NoteResult:
+        return note_result_payload.build_note_result(
+            markdown=markdown,
+            video_url=video_url,
+            transcript=transcript,
+            audio_meta=audio_meta,
+        )
 
     @staticmethod
     def _build_subtitle_only_audio_meta(
@@ -430,53 +348,16 @@ class NoteGenerator:
         platform: str,
         transcript: TranscriptResult,
     ) -> AudioDownloadResult:
-        video_url_str = str(video_url)
-        video_id = extract_video_id(video_url_str, platform) or video_url_str
-        raw = transcript.raw or {}
-        duration = 0.0
-        if transcript.segments:
-            duration = max(float(segment.end or 0) for segment in transcript.segments)
-
-        title = (
-            raw.get("title")
-            or raw.get("video_title")
-            or NoteGenerator._fetch_video_title(video_url_str, platform)
-            or video_id
-        )
-        return AudioDownloadResult(
-            file_path="",
-            title=title,
-            duration=duration,
-            cover_url=raw.get("thumbnail") or raw.get("cover_url"),
+        return subtitle_audio_meta.build_subtitle_only_audio_meta(
+            video_url=video_url,
             platform=platform,
-            video_id=video_id,
-            raw_info={
-                "tags": raw.get("tags", []),
-                "webpage_url": video_url_str,
-                "subtitle_source": raw.get("source"),
-            },
-            video_path=None,
+            transcript=transcript,
+            title_lookup=NoteGenerator._fetch_video_title,
         )
 
     @staticmethod
     def _fetch_video_title(video_url: str, platform: str) -> str | None:
-        if platform != "youtube":
-            return None
-
-        endpoint = "https://www.youtube.com/oembed"
-        try:
-            response = requests.get(
-                endpoint,
-                params={"url": video_url, "format": "json"},
-                timeout=10,
-            )
-            response.raise_for_status()
-            data = response.json()
-            title = (data.get("title") or "").strip()
-            return title or None
-        except Exception as exc:
-            logger.warning(f"获取 YouTube 标题失败，将回退到 video_id: {exc}")
-            return None
+        return subtitle_audio_meta.fetch_video_title(video_url, platform)
 
     def _polish_transcript(
         self,
@@ -487,23 +368,12 @@ class NoteGenerator:
     ) -> str:
         task_id = markdown_cache_file.stem
         self._update_status(task_id, TaskStatus.SUMMARIZING)
-
-        source = GPTSource(
-            title=audio_meta.title,
-            segment=transcript.segments,
-            tags=audio_meta.raw_info.get("tags", []),
-            language=transcript.language,
-            checkpoint_key=task_id,
+        return note_llm_markdown.polish_transcript_markdown(
+            audio_meta=audio_meta,
+            transcript=transcript,
+            gpt=gpt,
+            markdown_cache_file=markdown_cache_file,
         )
-        polished_text = gpt.polish_transcript(source).strip()
-        title = self._normalize_transcript_text(audio_meta.title or "未命名视频")
-        markdown = "\n\n".join([
-            f"# {title}",
-            polished_text,
-        ]).strip()
-        markdown_cache_file.write_text(markdown, encoding="utf-8")
-        logger.info(f"GPT 校对文字稿并缓存成功 ({markdown_cache_file})")
-        return markdown
 
     def _get_downloader(self, platform: str) -> Downloader:
         """
@@ -547,16 +417,39 @@ class NoteGenerator:
             return
 
         try:
-            write_task_status(
+            payload = NoteGenerator._build_status_payload(
                 task_id=task_id,
-                output_dir=NOTE_OUTPUT_DIR,
                 status=status,
                 message=message,
                 title=title,
                 platform=platform,
             )
+            write_task_status(
+                task_id=payload["task_id"],
+                output_dir=NOTE_OUTPUT_DIR,
+                status=payload["status"],
+                message=payload["message"],
+                title=payload["title"],
+                platform=payload["platform"],
+            )
         except Exception as e:
             logger.error(f"写入状态文件失败 (task_id={task_id})：{e}")
+
+    @staticmethod
+    def _build_status_payload(
+        task_id: str,
+        status: Union[str, TaskStatus],
+        message: Optional[str] = None,
+        title: Optional[str] = None,
+        platform: Optional[str] = None,
+    ) -> dict:
+        return note_result_payload.build_status_payload(
+            task_id=task_id,
+            status=status,
+            message=message,
+            title=title,
+            platform=platform,
+        )
 
     @staticmethod
     def _cancel_if_requested(task_id: Optional[str]) -> None:
@@ -571,13 +464,11 @@ class NoteGenerator:
 
     def _handle_exception(self, task_id, exc):
         logger.error(f"任务异常 (task_id={task_id})", exc_info=True)
-        error_message = getattr(exc, 'detail', str(exc))
-        if isinstance(error_message, dict):
-            try:
-                error_message = json.dumps(error_message, ensure_ascii=False)
-            except:
-                error_message = str(error_message)
-        self._update_status(task_id, TaskStatus.FAILED, message=error_message)
+        self._update_status(task_id, TaskStatus.FAILED, message=self._format_exception_message(exc))
+
+    @staticmethod
+    def _format_exception_message(exc: Exception) -> str:
+        return note_result_payload.format_exception_message(exc)
 
     def _download_media(
         self,
@@ -612,83 +503,26 @@ class NoteGenerator:
         :param grid_size: 缩略图网格尺寸
         :return: AudioDownloadResult 对象
         """
-        task_id = audio_cache_file.stem.split("_")[0]
-        self._update_status(task_id, status_phase)
-
-        # 已有缓存，尝试加载
-        if audio_cache_file.exists():
-            logger.info(f"检测到音频缓存 ({audio_cache_file})，直接读取")
-            try:
-                data = json.loads(audio_cache_file.read_text(encoding="utf-8"))
-                return AudioDownloadResult(**data)
-            except Exception as e:
-                logger.warning(f"读取音频缓存失败，将重新下载：{e}")
-
-        # 有字幕且不需要截图/视频理解时，只提取元信息不下载文件
-        if skip_download:
-            logger.info("已有字幕，仅提取视频元信息（不下载音视频）")
-            try:
-                audio = downloader.download(
-                    video_url=video_url,
-                    quality=quality,
-                    output_dir=output_path,
-                    need_video=False,
-                    skip_download=True,
-                )
-                audio_cache_file.write_text(
-                    json.dumps(asdict(audio), ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                logger.info(f"元信息提取完成 ({audio_cache_file})")
-                return audio
-            except Exception as exc:
-                logger.warning(f"元信息提取失败，将尝试完整下载: {exc}")
-
-        # 判断是否需要下载视频
-        need_video = screenshot or video_understanding
-        if screenshot and not grid_size:
-            grid_size = [2, 2]
-
-        frame_interval = video_interval if video_interval and video_interval > 0 else 6
-        if need_video:
-            try:
-                logger.info("开始下载视频")
-                video_path_str = downloader.download_video(video_url)
-                self.video_path = Path(video_path_str)
-                logger.info(f"视频下载完成：{self.video_path}")
-
-                if grid_size:
-                    self.video_img_urls = VideoReader(
-                        video_path=str(self.video_path),
-                        grid_size=tuple(grid_size),
-                        frame_interval=frame_interval,
-                        unit_width=960,
-                        unit_height=540,
-                        save_quality=80,
-                    ).run()
-                else:
-                    logger.info("未指定 grid_size，跳过缩略图生成")
-            except Exception as exc:
-                logger.error(f"视频下载失败：{exc}")
-                self._handle_exception(task_id, exc)
-                raise
-
-        # 下载音频
-        try:
-            logger.info("开始下载音频")
-            audio = downloader.download(
-                video_url=video_url,
-                quality=quality,
-                output_dir=output_path,
-                need_video=need_video,
-            )
-            audio_cache_file.write_text(json.dumps(asdict(audio), ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"音频下载并缓存成功 ({audio_cache_file})")
-            return audio
-        except Exception as exc:
-            logger.error(f"音频下载失败：{exc}")
-            self._handle_exception(task_id, exc)
-            raise
+        result = note_media_download.download_media(
+            downloader=downloader,
+            video_url=video_url,
+            quality=quality,
+            audio_cache_file=audio_cache_file,
+            status_phase=status_phase,
+            platform=platform,
+            output_path=output_path,
+            screenshot=screenshot,
+            video_understanding=video_understanding,
+            video_interval=video_interval,
+            grid_size=grid_size,
+            update_status=self._update_status,
+            handle_exception=self._handle_exception,
+            skip_download=skip_download,
+            log=logger,
+        )
+        self.video_path = result.video_path
+        self.video_img_urls = result.video_img_urls
+        return result.audio_meta
 
     def _summarize_text(
         self,
@@ -701,7 +535,7 @@ class NoteGenerator:
         formats: List[str],
         style: Optional[str],
         extras: Optional[str],
-            video_img_urls: List[str],
+        video_img_urls: List[str],
     ) -> str | None:
         """
         调用 GPT 对转写结果进行总结，生成 Markdown 文本并缓存。
@@ -720,24 +554,19 @@ class NoteGenerator:
         task_id = markdown_cache_file.stem
         self._update_status(task_id, TaskStatus.SUMMARIZING)
 
-        source = GPTSource(
-            title=audio_meta.title,
-            segment=transcript.segments,
-            tags=audio_meta.raw_info.get("tags", []),
-            screenshot=screenshot,
-            video_img_urls=video_img_urls,
-            link=link,
-            _format=formats,
-            style=style,
-            extras=extras,
-            checkpoint_key=task_id,
-        )
-
         try:
-            markdown = gpt.summarize(source)
-            markdown_cache_file.write_text(markdown, encoding="utf-8")
-            logger.info(f"GPT 总结并缓存成功 ({markdown_cache_file})")
-            return markdown
+            return note_llm_markdown.summarize_note_markdown(
+                audio_meta=audio_meta,
+                transcript=transcript,
+                gpt=gpt,
+                markdown_cache_file=markdown_cache_file,
+                link=link,
+                screenshot=screenshot,
+                formats=formats,
+                style=style,
+                extras=extras,
+                video_img_urls=video_img_urls,
+            )
         except Exception as exc:
             logger.error(f"GPT 总结失败：{exc}")
             self._handle_exception(task_id, exc)
@@ -761,19 +590,15 @@ class NoteGenerator:
         :param platform: 平台标识，用于链接替换
         :return: 处理后的 Markdown 字符串
         """
-        if "screenshot" in formats and video_path:
-            try:
-                markdown = self._insert_screenshots(markdown, video_path)
-            except Exception as exc:
-                logger.warning("截图插入失败，跳过该步骤")
-
-        if "link" in formats:
-            try:
-                markdown = replace_content_markers(markdown, video_id=audio_meta.video_id, platform=platform)
-            except Exception as e:
-                logger.warning(f"链接插入失败，跳过该步骤：{e}")
-
-        return markdown
+        return note_markdown_postprocess.post_process_markdown(
+            markdown=markdown,
+            video_path=video_path,
+            formats=formats,
+            audio_meta=audio_meta,
+            platform=platform,
+            insert_screenshots=self._insert_screenshots,
+            log=logger,
+        )
 
     def _insert_screenshots(self, markdown: str, video_path: Path) -> str | None | Any:
         """
@@ -783,19 +608,13 @@ class NoteGenerator:
         :param video_path: 本地视频文件路径
         :return: 替换后的 Markdown 字符串
         """
-        matches: List[Tuple[str, int]] = extract_screenshot_timestamps(markdown)
-        for idx, (marker, ts) in enumerate(matches):
-            try:
-                img_path = generate_screenshot(str(video_path), str(IMAGE_OUTPUT_DIR), ts, idx)
-                filename = Path(img_path).name
-                # 构建前端可访问的 URL，例如 /static/screenshots/{filename}
-                img_url = f"{IMAGE_BASE_URL.rstrip('/')}/{filename}"
-                markdown = markdown.replace(marker, f"![]({img_url})", 1)
-            except Exception as exc:
-                logger.error(f"生成截图失败 (timestamp={ts})：{exc}")
-                # self._handle_exception(task_id, exc)
-                return None
-        return markdown
+        return note_markdown_postprocess.insert_screenshots(
+            markdown,
+            video_path,
+            image_output_dir=str(IMAGE_OUTPUT_DIR),
+            image_base_url=IMAGE_BASE_URL,
+            log=logger,
+        )
 
     @staticmethod
     def _extract_screenshot_timestamps(markdown: str) -> List[Tuple[str, int]]:
