@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks
-from pydantic import BaseModel, Field
 
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
+from app.routers.batch_models import BatchCancelRequest, BatchPreviewRequest, BatchStartRequest, BatchVideo
 from app.services import batch_processed
 from app.services import batch_preview as batch_preview_service
 from app.services import batch_runner
@@ -67,42 +67,6 @@ _extract_youtube_continuation_rich_grid = batch_preview_service._extract_youtube
 _page_fetch_window = batch_preview_service._page_fetch_window
 
 _BATCH_PREVIEW_PATCH_ALIASES = {"infer_platform_from_url": "_infer_platform_from_url"}
-
-
-class BatchPreviewRequest(BaseModel):
-    space_url: str
-    limit: int = Field(default=0, ge=0, le=500)
-    page: int = Field(default=1, ge=1)
-    page_size: int = Field(default=20, ge=1, le=50)
-
-
-class BatchVideo(BaseModel):
-    video_id: str
-    video_url: str
-    title: str = ""
-    platform: Optional[str] = None
-
-
-class BatchStartRequest(BaseModel):
-    videos: list[BatchVideo]
-    mode: str = SUPPORTED_GENERATION_MODE
-    quality: DownloadQuality = DownloadQuality.fast
-    skip_existing: bool = True
-    concurrency: int = Field(default=1, ge=1, le=2)
-    link: bool = False
-    screenshot: bool = False
-    model_name: Optional[str] = None
-    provider_id: Optional[str] = None
-    format: list[str] = Field(default_factory=list)
-    style: Optional[str] = None
-    extras: Optional[str] = None
-    video_understanding: bool = False
-    video_interval: int = 0
-    grid_size: list[int] = Field(default_factory=list)
-
-
-class BatchCancelRequest(BaseModel):
-    batch_id: str
 
 
 def _delete_task_artifacts(task_id: str, output_dir: Path) -> int:
