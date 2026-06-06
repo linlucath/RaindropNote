@@ -21,13 +21,22 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        'lottie-web': 'lottie-web/build/player/lottie_light',
       },
     },
     build: {
       rollupOptions: {
         output: {
           manualChunks: {
-            markdown: ['react-markdown', 'react-syntax-highlighter', 'remark-gfm', 'remark-math', 'rehype-katex'],
+            markdown: [
+              'react-markdown',
+              'react-syntax-highlighter',
+              'remark-gfm',
+              'remark-math',
+              'rehype-katex',
+            ],
+            design: ['antd', '@lobehub/icons', 'lucide-react'],
+            lottie: ['lottie-react'],
             vendor: ['react', 'react-dom', 'react-router-dom'],
           },
         },

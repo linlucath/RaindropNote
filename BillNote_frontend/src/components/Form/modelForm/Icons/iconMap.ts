@@ -1,4 +1,3 @@
-// iconMap.ts
-import * as Icons from '@lobehub/icons'
+import { aiLogoMap } from '@/components/aiLogoMap'
 
-export const IconMap = Icons;
+export const IconMap = aiLogoMap
