@@ -1,7 +1,7 @@
 import logging
 import os
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Any
+from typing import List, Optional, Union, Any
 
 from pydantic import HttpUrl
 from dotenv import load_dotenv
@@ -29,7 +29,6 @@ from app.services import subtitle_audio_meta
 from app.services import subtitle_transcripts
 from app.services.task_runtime import default_note_output_dir
 from app.services import transcript_markdown
-from app.utils.screenshot_marker import extract_screenshot_timestamps
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -257,23 +256,6 @@ class NoteGenerator:
             return None
 
     @staticmethod
-    def _is_subtitle_transcript_data(data: dict) -> bool:
-        return subtitle_transcripts.is_subtitle_transcript_data(data)
-
-    @staticmethod
-    def _is_subtitle_transcript_result(transcript: TranscriptResult) -> bool:
-        return subtitle_transcripts.is_subtitle_transcript_result(transcript)
-
-    @staticmethod
-    def _load_transcript_cache(
-        transcript_cache_file: Path,
-    ) -> Optional[TranscriptResult]:
-        return subtitle_transcripts.load_subtitle_transcript_cache(
-            transcript_cache_file,
-            log=logger,
-        )
-
-    @staticmethod
     def delete_note(video_id: Optional[str] = None, platform: Optional[str] = None, task_id: Optional[str] = None) -> int:
         """
         删除数据库中的任务记录
@@ -304,18 +286,6 @@ class NoteGenerator:
         :return: GPT 实例
         """
         return note_gpt_provider.build_gpt(model_name, provider_id, log=logger)
-
-    @staticmethod
-    def _format_timestamp(seconds: float) -> str:
-        return transcript_markdown.format_timestamp(seconds)
-
-    @staticmethod
-    def _simplify_chinese(text: str) -> str:
-        return transcript_markdown.simplify_chinese(text)
-
-    @staticmethod
-    def _normalize_transcript_text(text: str) -> str:
-        return transcript_markdown.normalize_transcript_text(text)
 
     @staticmethod
     def _build_transcript_markdown(audio_meta: AudioDownloadResult, transcript: TranscriptResult) -> str:
@@ -632,17 +602,6 @@ class NoteGenerator:
             image_base_url=IMAGE_BASE_URL,
             log=logger,
         )
-
-    @staticmethod
-    def _extract_screenshot_timestamps(markdown: str) -> List[Tuple[str, int]]:
-        """
-        从 Markdown 文本中提取所有 '*Screenshot-mm:ss' 或 'Screenshot-[mm:ss]' 标记，
-        返回 [(原始标记文本, 时间戳秒数), ...] 列表。
-
-        :param markdown: 原始 Markdown 文本
-        :return: 标记与对应时间戳秒数的列表
-        """
-        return extract_screenshot_timestamps(markdown)
 
     def _save_metadata(self, video_id: str, platform: str, task_id: str) -> None:
         """
