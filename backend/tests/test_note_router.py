@@ -18,6 +18,48 @@ from app.routers.note import run_note_task
 
 
 class TestNoteRouter(unittest.TestCase):
+    def test_video_request_list_defaults_are_independent(self):
+        first = note_router.VideoRequest(
+            video_url="https://www.bilibili.com/video/BV123",
+            quality=DownloadQuality.fast,
+        )
+        second = note_router.VideoRequest(
+            video_url="https://www.bilibili.com/video/BV456",
+            quality=DownloadQuality.fast,
+        )
+
+        first.format.append("link")
+        first.grid_size.append(2)
+
+        self.assertEqual(second.format, [])
+        self.assertEqual(second.grid_size, [])
+
+    def test_run_note_task_uses_fresh_grid_size_default(self):
+        with patch("app.routers.note.note_tasks.run_note_task", return_value=None) as run_task_impl:
+            run_note_task(
+                task_id="task-1",
+                video_url="https://www.bilibili.com/video/BV123",
+                platform="bilibili",
+                quality=DownloadQuality.fast,
+                model_name="demo-model",
+                provider_id="demo-provider",
+            )
+            first_grid_size = run_task_impl.call_args.kwargs["grid_size"]
+            first_grid_size.append(2)
+
+            run_note_task(
+                task_id="task-2",
+                video_url="https://www.bilibili.com/video/BV456",
+                platform="bilibili",
+                quality=DownloadQuality.fast,
+                model_name="demo-model",
+                provider_id="demo-provider",
+            )
+            second_grid_size = run_task_impl.call_args.kwargs["grid_size"]
+
+        self.assertEqual(second_grid_size, [])
+        self.assertIsNot(first_grid_size, second_grid_size)
+
     def test_default_transcript_task_requires_model_before_generation(self):
         fake_note = NoteResult(markdown="# 标题\n\n## 简体中文文字稿\n\n已有字幕", transcript=None, audio_meta=None)
 
