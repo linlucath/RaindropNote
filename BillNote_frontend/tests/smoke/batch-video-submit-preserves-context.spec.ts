@@ -100,8 +100,8 @@ test('batch preview submission keeps the current batch context visible', async (
 
   await page.goto('/')
 
-  await expect(page.getByText('BiliNote')).toBeVisible()
-  await page.getByRole('button', { name: 'UP 主批量' }).click()
+  await expect(page.getByText('雨滴笔记助手')).toBeVisible()
+  await page.getByRole('button', { name: '创作者主页' }).click()
   await page
     .getByPlaceholder('https://space.bilibili.com/123456')
     .fill('https://space.bilibili.com/123456')

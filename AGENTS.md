@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-BiliNote is an AI video note generation tool. It extracts content from video links (Bilibili, YouTube, Douyin, Kuaishou, local files) and generates structured Markdown notes using LLM models. Full-stack app with a FastAPI backend, React frontend, and optional Tauri desktop packaging.
+雨滴笔记助手 is an AI study-note tool for turning user-authorized video, audio, and local media into polished transcripts and structured Markdown notes. Full-stack app with a FastAPI backend, React frontend, and optional Tauri desktop packaging.
 
 ## Development Commands
 
@@ -57,13 +57,13 @@ cd BillNote_frontend && pnpm tauri build
 - `components/ui/` — shadcn/ui (Radix-based) components
 - Path alias: `@` → `./src`
 
-**Core Workflow**: User submits URL → task queued → download video → extract audio (FFmpeg) → transcribe (Whisper/Groq/etc) → generate notes (LLM) → frontend polls for completion → display Markdown.
+**Core Workflow**: User submits authorized media → task queued → prepare media/audio (FFmpeg) → transcribe (Whisper/Groq/etc) → generate notes (LLM) → frontend polls for completion → display Markdown.
 
 ## Key Configuration
 
 - **Ports**: Backend 8483, Frontend dev 3015, Docker maps 3015→80
 - **Environment**: Root `.env` (copy from `.env.example`). LLM API keys are configured through the UI, not env vars.
-- **Database**: SQLite at `backend/app/db/bili_note.db`, auto-initialized on first run
+- **Database**: SQLite default `raindrop_note.db`, auto-initialized on first run
 - **FFmpeg**: Required system dependency for video/audio processing
 - **Vite proxy**: Dev server proxies `/api` and `/static` to backend (configured in `vite.config.ts`, reads env from parent dir)
 
@@ -77,4 +77,4 @@ cd BillNote_frontend && pnpm tauri build
 
 - **Frontend**: ESLint + Prettier (2 spaces, single quotes, 100 char width, Tailwind plugin). TypeScript strict mode.
 - **Backend**: Python with type hints. No configured linter. Uses Pydantic models for validation.
-- **Note**: The frontend directory is named `BillNote_frontend` (not "Bili").
+- **Note**: The frontend directory is still named `BillNote_frontend` for compatibility; this is a historical path name, not the product brand.

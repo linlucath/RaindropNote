@@ -45,7 +45,7 @@ def get_uploader_videos(
             limit=limit,
         )
     except Exception as exc:  # pragma: no cover - passthrough for runtime failures
-        return R.error(msg=f'获取 UP 主视频失败: {exc}')
+        return R.error(msg=f'获取创作者视频失败: {exc}')
     return R.success(data=videos)
 
 

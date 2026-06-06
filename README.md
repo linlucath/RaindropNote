@@ -1,110 +1,43 @@
-<div style="display: flex; justify-content: center; align-items: center; gap: 10px;
-">
-    <p align="center">
-  <img src="./doc/icon.svg" alt="BiliNote Banner" width="50" height="50"  />
-</p>
-<h1 align="center" > BiliNote v2.0.0</h1>
-</div>
+# 雨滴笔记助手
 
-<p align="center"><i>AI 视频笔记生成工具 让 AI 为你的视频做笔记</i></p>
+雨滴笔记助手是一款面向个人学习、研究和内容整理场景的 AI 视频笔记工具。它可以将用户有权访问和使用的视频、音频或本地文件整理为可检索、可校对、可沉淀的 Markdown 文字稿与结构化笔记。
 
-<p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" />
-  <img src="https://img.shields.io/badge/frontend-react%2019-blue" />
-  <img src="https://img.shields.io/badge/backend-fastapi-green" />
-  <img src="https://img.shields.io/badge/GPT-openai%20%7C%20deepseek%20%7C%20qwen-ff69b4" />
-  <img src="https://img.shields.io/badge/docker-ghcr.io-blue" />
-  <img src="https://img.shields.io/badge/status-active-success" />
-  <img src="https://img.shields.io/github/stars/jefferyhcool/BiliNote?style=social" />
-</p>
+项目采用 FastAPI 后端、React + Vite 前端，并支持可选的 Tauri 桌面端打包。
 
+## 定位
 
+雨滴笔记助手关注的是“把已经合法获得的学习材料整理成自己的知识资产”，而不是下载器、搬运工具或内容分发服务。
 
-## ✨ 项目简介
+- 适合：课程复盘、会议材料整理、公开讲座学习、个人收藏内容归档、本地音视频转写。
+- 不适合：绕过平台限制、批量抓取第三方内容、复制传播未经授权的视频/字幕/文字稿。
 
-BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、YouTube、抖音等视频链接，自动提取内容并生成结构清晰、重点明确的 Markdown 格式笔记。支持插入截图、原片跳转等功能。
+## 功能特性
 
-## 📝 使用文档
-详细文档可以查看[这里](https://docs.bilinote.app/)
+- 多来源内容导入：支持常见公开视频链接与本地音视频文件。
+- AI 文字稿整理：将转写结果校对为更易阅读的 Markdown 文本。
+- 结构化笔记生成：根据内容生成重点、章节、摘要和可继续编辑的学习笔记。
+- 自定义模型配置：支持 OpenAI、DeepSeek、Qwen 等兼容模型服务。
+- 多种转写引擎：支持 Fast-Whisper、MLX-Whisper、Groq、BCut 等方案。
+- 历史记录管理：保留生成记录，方便回看、收藏和继续整理。
+- 原文参照：支持查看分段转写内容，便于核对和修订。
+- 本地优先部署：可通过源码、Docker 或桌面端方式运行。
 
-## 体验地址
-可以通过访问 [这里](https://www.bilinote.app/) 进行体验，速度略慢，不支持长视频。
+## 使用边界
 
-## 📦 桌面版下载
-本项目提供了 Windows 和 macOS 桌面客户端，可在 [Releases](https://github.com/JefferyHcool/BiliNote/releases) 页面下载最新版本。
+请只处理你拥有权利、已经获得授权，或平台规则允许你用于个人学习和整理的内容。使用者应自行确认内容来源、平台条款和版权边界。
 
-> Windows 用户请注意：一定要在没有中文路径的环境下运行。
+请勿将本项目用于：
 
-## 🔧 功能特性
+- 绕过平台访问控制、会员限制、付费限制或其他技术保护措施。
+- 批量抓取、复制、存储、传播第三方平台内容。
+- 公开分发未经授权的视频、音频、字幕、全文文字稿或衍生材料。
+- 以任何方式暗示本项目与第三方平台存在官方合作、授权或背书。
 
-- 支持多平台：Bilibili、YouTube、本地视频、抖音、快手
-- 支持返回笔记格式选择
-- 支持笔记风格选择
-- 支持多模态视频理解
-- 支持多版本记录保留
-- 支持自行配置 GPT 大模型（OpenAI、DeepSeek、Qwen 等）
-- 本地模型音频转写（支持 Fast-Whisper、MLX-Whisper、Groq、BCut）
-- GPT 大模型总结视频内容
-- 自动生成结构化 Markdown 笔记
-- 可选插入截图（自动截取）
-- 可选内容跳转链接（关联原视频）
-- 任务记录与历史回看
-- 笔记顶部视频封面 Banner 展示
-- 工作区和生成历史面板支持折叠/展开
+生成结果可能包含识别错误或模型幻觉，请在引用、发布或用于正式场景前自行核验。
 
-### v2.0.0 新增
+## 快速开始
 
-- 笔记顶部新增视频封面 Banner
-- 工作区和生成历史面板支持折叠/展开
-- 笔记开头添加来源链接功能
-- YouTube 字幕优先获取，有字幕时跳过音频下载
-- 性能优化与转写器配置改进
-
-## 📸 截图预览
-![screenshot](./doc/image1.png)
-![screenshot](./doc/image3.png)
-![screenshot](./doc/image.png)
-![screenshot](./doc/image4.png)
-![screenshot](./doc/image5.png)
-
-## 🚀 快速开始
-
-### 方式一：Docker 部署（推荐）
-
-确保已安装 Docker，直接拉取预构建镜像运行：
-
-```bash
-docker pull ghcr.io/jefferyhcool/bilinote:latest
-
-docker run -d -p 80:80 \
-  -v bilinote-data:/app/backend/data \
-  --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
-```
-
-访问：`http://localhost`
-
-也可以使用 docker-compose 本地构建：
-
-```bash
-# 标准部署
-docker-compose up -d
-
-# GPU 加速部署（需要 NVIDIA GPU）
-docker-compose -f docker-compose.gpu.yml up -d
-```
-
-### 方式二：源码部署
-
-#### 1. 克隆仓库
-
-```bash
-git clone https://github.com/JefferyHcool/BiliNote.git
-cd BiliNote
-mv .env.example .env
-```
-
-#### 2. 启动后端（FastAPI）
+### 后端
 
 ```bash
 cd backend
@@ -112,7 +45,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-#### 3. 启动前端（Vite + React）
+后端默认监听 `0.0.0.0:8483`。
+
+### 前端
 
 ```bash
 cd BillNote_frontend
@@ -120,89 +55,65 @@ pnpm install
 pnpm dev
 ```
 
-访问：`http://localhost:3015`
+前端开发服务默认运行在 `http://localhost:3015`，并将 `/api` 代理到后端。
 
-## ⚙️ 依赖说明
+### Docker
 
-### 🎬 FFmpeg
-本项目依赖 ffmpeg 用于音频处理与转码，源码部署时必须安装：
 ```bash
-# Mac (brew)
+docker-compose up
+```
+
+如需 GPU 版本：
+
+```bash
+docker-compose -f docker-compose.gpu.yml up
+```
+
+## 环境依赖
+
+### FFmpeg
+
+项目依赖 FFmpeg 进行音频处理与转码。源码部署时请先安装：
+
+```bash
+# macOS
 brew install ffmpeg
 
 # Ubuntu / Debian
 sudo apt install ffmpeg
-
-# Windows
-# 请从官网下载安装：https://ffmpeg.org/download.html
 ```
-> ⚠️ 若系统无法识别 ffmpeg，请将其加入系统环境变量 PATH
->
-> Docker 部署已内置 FFmpeg，无需额外安装。
 
-### 🚀 CUDA 加速（可选）
-若你希望更快地执行音频转写任务，可使用具备 NVIDIA GPU 的机器，并启用 fast-whisper + CUDA 加速版本：
+Windows 用户可从 [FFmpeg 官网](https://ffmpeg.org/download.html)下载安装，并将其加入系统环境变量 `PATH`。
 
-具体 `fast-whisper` 配置方法，请参考：[fast-whisper 项目地址](http://github.com/SYSTRAN/faster-whisper#requirements)
+### 模型与 API Key
 
-### 🐳 使用 Docker 一键部署
+大模型服务和转写服务可在应用设置页中配置。建议优先使用你可控、合规、稳定的模型服务。
 
-确保你已安装 Docker，然后直接拉取预构建镜像运行：
+## 项目结构
+
+- `backend/`：FastAPI 后端、下载适配、转写、笔记生成、数据库与导出逻辑。
+- `BillNote_frontend/`：React + Vite 前端，包含主工作区、设置页、历史记录和收藏页。
+- `nginx/`：Docker Web 部署的 Nginx 配置。
+- `docs/`：开发说明、运行手册与历史设计文档。
+
+## 开发命令
 
 ```bash
-# 拉取最新镜像
-docker pull ghcr.io/jefferyhcool/bilinote:latest
+# 后端
+cd backend
+python main.py
 
-# 运行容器
-docker run -d -p 80:80 \
-  -v bilinote-data:/app/backend/data \
-  --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
+# 前端
+cd BillNote_frontend
+pnpm dev
+pnpm build
+pnpm lint
 ```
 
-访问：`http://localhost`
-
-也可以使用 docker-compose 本地构建：
-
-```bash
-# 标准部署
-docker-compose up -d
-
-# GPU 加速部署（需要 NVIDIA GPU）
-docker-compose -f docker-compose.gpu.yml up -d
-```
-
-## 🧠 TODO
-
-- [x] 支持抖音及快手等视频平台
-- [x] 支持前端设置切换 AI 模型切换、语音转文字模型
-- [x] AI 摘要风格自定义（学术风、口语风、重点提取等）
-- [x] 加入更多模型支持
-- [x] 加入更多音频转文本模型支持
-- [ ] 笔记导出为 PDF / Word / Notion
-
-### Contact and Join-联系和加入社区
-年会恢复更新以后放出最新社区地址
-
-
-
-## 🔎代码参考
-- 本项目中的 `抖音下载功能` 部分代码参考引用自：[Evil0ctal/Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)
-
-## 📜 License
+## 许可证
 
 MIT License
 
----
+## 致谢
 
-💬 你的支持与反馈是我持续优化的动力！欢迎 PR、提 issue、Star ⭐️
-## Buy Me a Coffee / 捐赠
-如果你觉得项目对你有帮助，考虑支持我一下吧
-<div style='display:inline;'>
-    <img width='30%' src='https://common-1304618721.cos.ap-chengdu.myqcloud.com/8986c9eb29c356a0cfa3d470c23d3b6.jpg'/>
-    <img width='30%' src='https://common-1304618721.cos.ap-chengdu.myqcloud.com/2a049ea298b206bcd0d8b8da3219d6b.jpg'/>
-</div>
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=JefferyHcool/BiliNote&type=Date)](https://www.star-history.com/#JefferyHcool/BiliNote&Date)
+本项目中的部分平台适配逻辑参考了公开社区项目与文档。请在使用相关功能时遵守对应平台规则和内容版权要求。

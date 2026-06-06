@@ -7,8 +7,8 @@ interface RootLayoutProps {
 }
 
 export const metadata = {
-  title: 'BiliNote - 视频文字稿生成器',
-  description: '通过视频链接结合大模型自动生成校对后的文字稿',
+  title: '雨滴笔记助手 - AI 学习笔记整理工具',
+  description: '将有权使用的视频、音频或本地文件整理为文字稿与结构化笔记',
 }
 
 const RootLayout: FC<RootLayoutProps> = ({ children }) => {

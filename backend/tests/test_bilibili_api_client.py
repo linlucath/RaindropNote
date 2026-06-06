@@ -108,7 +108,7 @@ def test_request_json_allows_custom_headers_and_business_error_messages():
     with pytest.raises(ValueError, match='Bilibili 接口触发风控，请稍后重试'):
         client.request_json(
             'https://api.bilibili.com/example',
-            fallback_error='获取 UP 主视频失败',
+            fallback_error='获取创作者视频失败',
             headers={'X-Test': 'custom'},
             error_messages_by_code={-352: 'Bilibili 接口触发风控，请稍后重试'},
         )

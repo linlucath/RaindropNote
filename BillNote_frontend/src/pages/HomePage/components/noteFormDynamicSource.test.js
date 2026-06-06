@@ -11,7 +11,7 @@ const source = readFileSync(path.join(__dirname, 'NoteForm.tsx'), 'utf8')
 test('NoteForm exposes dynamics as a top-level source type', () => {
   assert.match(source, /source_type: z\.enum\(\['single', 'uploader_batch', 'dynamics'\]\)/)
   assert.match(source, /value: 'dynamics'/)
-  assert.match(source, /label: '关注动态'/)
+  assert.match(source, /label: '订阅动态'/)
 })
 
 test('NoteForm renders task type with the shared select control', () => {
@@ -66,9 +66,9 @@ test('NoteForm auto-loads followed dynamics without a manual fetch button', () =
 })
 
 test('NoteForm omits explanatory helper copy from dynamic and following sources', () => {
-  assert.doesNotMatch(source, /关注动态会自动加载/)
+  assert.doesNotMatch(source, /订阅动态会自动加载/)
   assert.doesNotMatch(source, /从列表里选择投稿视频后立即开始转写/)
-  assert.doesNotMatch(source, /点击后会自动加载该 UP 主的视频列表/)
+  assert.doesNotMatch(source, /点击后会自动加载该创作者的视频列表/)
   assert.doesNotMatch(source, /视频列表会自动加载/)
   assert.doesNotMatch(source, /当前列表已锁定/)
   assert.doesNotMatch(source, /点击视频即可立即开始处理文字稿/)
