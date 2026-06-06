@@ -12,7 +12,6 @@ from app.enmus.note_enums import DownloadQuality
 from app.gpt.base import GPT
 from app.models.notes_model import AudioDownloadResult, NoteResult
 from app.models.transcriber_model import TranscriptResult
-from app.services.progress_state import cancel_task, is_task_cancel_requested, write_task_status
 from app.services import note_gpt_provider
 from app.services import note_completion
 from app.services import note_downloader_provider
@@ -22,6 +21,7 @@ from app.services import note_markdown_postprocess
 from app.services import note_media_download
 from app.services import note_records
 from app.services import note_result_payload
+from app.services import note_task_lifecycle
 from app.services import note_transcript_source
 from app.services import subtitle_audio_meta
 from app.services import subtitle_transcripts
@@ -50,8 +50,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class TaskCancelledError(RuntimeError):
-    pass
+TaskCancelledError = note_task_lifecycle.TaskCancelledError
 
 
 class NoteGenerator:
@@ -380,27 +379,15 @@ class NoteGenerator:
         :param status: TaskStatus 枚举或自定义状态字符串
         :param message: 可选消息，用于记录失败原因等
         """
-        if not task_id:
-            return
-
-        try:
-            payload = NoteGenerator._build_status_payload(
-                task_id=task_id,
-                status=status,
-                message=message,
-                title=title,
-                platform=platform,
-            )
-            write_task_status(
-                task_id=payload["task_id"],
-                output_dir=NOTE_OUTPUT_DIR,
-                status=payload["status"],
-                message=payload["message"],
-                title=payload["title"],
-                platform=payload["platform"],
-            )
-        except Exception as e:
-            logger.error(f"写入状态文件失败 (task_id={task_id})：{e}")
+        note_task_lifecycle.update_task_status(
+            task_id=task_id,
+            output_dir=NOTE_OUTPUT_DIR,
+            status=status,
+            message=message,
+            title=title,
+            platform=platform,
+            log=logger,
+        )
 
     @staticmethod
     def _build_status_payload(
@@ -410,7 +397,7 @@ class NoteGenerator:
         title: Optional[str] = None,
         platform: Optional[str] = None,
     ) -> dict:
-        return note_result_payload.build_status_payload(
+        return note_task_lifecycle.build_status_payload(
             task_id=task_id,
             status=status,
             message=message,
@@ -420,22 +407,19 @@ class NoteGenerator:
 
     @staticmethod
     def _cancel_if_requested(task_id: Optional[str]) -> None:
-        if not task_id:
-            return
-
-        if not is_task_cancel_requested(task_id=task_id, output_dir=NOTE_OUTPUT_DIR):
-            return
-
-        cancel_task(task_id=task_id, output_dir=NOTE_OUTPUT_DIR)
-        raise TaskCancelledError('任务已取消')
+        note_task_lifecycle.cancel_if_requested(task_id=task_id, output_dir=NOTE_OUTPUT_DIR)
 
     def _handle_exception(self, task_id, exc):
-        logger.error(f"任务异常 (task_id={task_id})", exc_info=True)
-        self._update_status(task_id, TaskStatus.FAILED, message=self._format_exception_message(exc))
+        note_task_lifecycle.handle_task_exception(
+            task_id=task_id,
+            exc=exc,
+            update_status=self._update_status,
+            log=logger,
+        )
 
     @staticmethod
     def _format_exception_message(exc: Exception) -> str:
-        return note_result_payload.format_exception_message(exc)
+        return note_task_lifecycle.format_exception_message(exc)
 
     def _download_media(
         self,
