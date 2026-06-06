@@ -17,6 +17,7 @@ from app.services.progress_query import build_progress_overview
 from app.services.progress_state import request_task_cancel
 from app.services.task_runtime import default_note_output_dir
 from app.services.task_serial_executor import get_task_executor
+from app.utils.path_helper import get_uploads_dir
 from app.utils.response import ResponseWrapper as R
 
 router = APIRouter()
@@ -68,7 +69,7 @@ class VideoRequest(BaseModel):
 
 
 NOTE_OUTPUT_DIR = str(default_note_output_dir())
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = get_uploads_dir()
 
 
 def _is_note_result_file(path: Path) -> bool:

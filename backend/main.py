@@ -14,6 +14,7 @@ from app.exceptions.exception_handlers import register_exception_handlers
 # from app.db.model_dao import init_model_table
 # from app.db.provider_dao import init_provider_table
 from app.utils.logger import get_logger
+from app.utils.path_helper import get_screenshot_dir, get_static_dir, get_uploads_dir
 from app import create_app
 from events import register_handler
 
@@ -22,11 +23,11 @@ load_dotenv()
 
 # 读取 .env 中的路径
 static_path = os.getenv('STATIC', '/static')
-out_dir = os.getenv('OUT_DIR', './static/screenshots')
+out_dir = get_screenshot_dir()
 
 # 自动创建本地目录（static 和 static/screenshots）
-static_dir = "static"
-uploads_dir = "uploads"
+static_dir = get_static_dir()
+uploads_dir = get_uploads_dir()
 if not os.path.exists(static_dir):
     os.makedirs(static_dir)
 if not os.path.exists(uploads_dir):
