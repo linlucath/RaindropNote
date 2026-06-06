@@ -14,11 +14,8 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            target: universal-apple-darwin
           - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
           - platform: windows-latest
-            target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
 
@@ -63,7 +60,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 'latest'
+          version: '10.33.0'
 
       # 设置 Node 环境
       - name: Set up Node.js
@@ -73,7 +70,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: BillNote_frontend
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       # 设置 Rust 环境
       - name: Set up Rust
@@ -95,23 +92,44 @@ jobs:
       # 打包 Tauri 应用
       - name: Build Tauri App
         working-directory: BillNote_frontend
-        run: pnpm tauri build
+        run: pnpm desktop:build:ci
 
       # 收集产物到统一目录
       - name: Collect release artifacts
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p release-artifacts
           BUNDLE_DIR="BillNote_frontend/src-tauri/target/release/bundle"
 
-          # macOS: .dmg
-          find "$BUNDLE_DIR" -name "*.dmg" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          # Windows: .msi, .exe (NSIS)
-          find "$BUNDLE_DIR" -name "*.msi" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          find "$BUNDLE_DIR/nsis" -name "*.exe" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          # Linux: .deb, .AppImage
-          find "$BUNDLE_DIR" -name "*.deb" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          find "$BUNDLE_DIR" -name "*.AppImage" -exec cp {} release-artifacts/ \; 2>/dev/null || true
+          case "$RUNNER_OS" in
+            macOS)
+              ARTIFACT_PATTERNS=("*.dmg")
+              ;;
+            Linux)
+              ARTIFACT_PATTERNS=("*.deb" "*.AppImage")
+              ;;
+            Windows)
+              ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")
+              ;;
+            *)
+              echo "Unsupported runner OS: $RUNNER_OS" >&2
+              exit 1
+              ;;
+          esac
+
+          FOUND_ARTIFACTS=0
+          for pattern in "${ARTIFACT_PATTERNS[@]}"; do
+            while IFS= read -r artifact; do
+              cp "$artifact" release-artifacts/
+              FOUND_ARTIFACTS=$((FOUND_ARTIFACTS + 1))
+            done < <(find "$BUNDLE_DIR" -path "$BUNDLE_DIR/$pattern" -type f)
+          done
+
+          if ! [[ "$FOUND_ARTIFACTS" -gt 0 ]]; then
+            echo "No release artifacts found for $RUNNER_OS in $BUNDLE_DIR" >&2
+            exit 1
+          fi
 
           echo "=== Collected artifacts ==="
           ls -lh release-artifacts/
@@ -121,8 +139,14 @@ jobs:
         shell: bash
         run: |
           cd release-artifacts
-          sha256sum * > SHA256SUMS.txt 2>/dev/null || shasum -a 256 * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          CHECKSUM_FILE="SHA256SUMS-${{ matrix.platform }}.txt"
+          if command -v sha256sum >/dev/null 2>&1; then
+            CHECKSUM_COMMAND=(sha256sum)
+          else
+            CHECKSUM_COMMAND=(shasum -a 256)
+          fi
+          "${CHECKSUM_COMMAND[@]}" * > "$CHECKSUM_FILE"
+          cat "$CHECKSUM_FILE"
 
       # 上传产物（供 release job 使用）
       - name: Upload artifacts
@@ -156,11 +180,31 @@ jobs:
           echo "=== All release artifacts ==="
           ls -lhR all-artifacts/
 
+      - name: Verify downloaded release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for checksum in \
+            SHA256SUMS-macos-latest.txt \
+            SHA256SUMS-ubuntu-22.04.txt \
+            SHA256SUMS-windows-latest.txt
+          do
+            if [[ ! -s "all-artifacts/$checksum" ]]; then
+              echo "Missing checksum file: $checksum" >&2
+              exit 1
+            fi
+          done
+          find all-artifacts -type f ! -name 'SHA256SUMS-*.txt' | grep -q .
+          cd all-artifacts
+          for checksum in SHA256SUMS-*.txt; do
+            sha256sum -c "$checksum"
+          done
+
       # 创建 Release 并上传产物
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: BiliNote ${{ github.ref_name }}
+          name: 雨滴笔记助手 ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true

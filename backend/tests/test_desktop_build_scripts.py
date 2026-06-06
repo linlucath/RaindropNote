@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+import os
+import json
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    backend_dir = repo_root / "backend"
+    tauri_bin_dir = repo_root / "BillNote_frontend" / "src-tauri" / "bin"
+    fake_bin_dir = tmp_path / "fake-bin"
+
+    backend_dir.mkdir(parents=True)
+    tauri_bin_dir.mkdir(parents=True)
+    fake_bin_dir.mkdir(parents=True)
+    (backend_dir / "app" / "db").mkdir(parents=True)
+    (backend_dir / "app" / "db" / "builtin_providers.json").write_text("{}", encoding="utf-8")
+    (backend_dir / ".env.example").write_text("BACKEND_PORT=8483\n", encoding="utf-8")
+    (backend_dir / "main.py").write_text("print('backend')\n", encoding="utf-8")
+
+    shutil.copyfile(Path(__file__).parents[1] / "build.sh", backend_dir / "build.sh")
+    (backend_dir / "build.sh").chmod(0o755)
+
+    _write_executable(
+        fake_bin_dir / "rustc",
+        "#!/usr/bin/env bash\n"
+        "cat <<'EOF'\n"
+        "rustc 1.0.0\n"
+        "host: x86_64-test-platform\n"
+        "EOF\n",
+    )
+    _write_executable(
+        fake_bin_dir / "pyinstaller",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "distpath=''\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  case \"$1\" in\n"
+        "    --distpath) distpath=\"$2\"; shift 2 ;;\n"
+        "    --add-data)\n"
+        "      source_path=\"${2%%:*}\"\n"
+        "      test -f \"$source_path\"\n"
+        "      shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        "mkdir -p \"$distpath/RaindropNoteBackend/_internal\"\n"
+        "touch \"$distpath/RaindropNoteBackend/RaindropNoteBackend\"\n",
+    )
+
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin_dir}{os.pathsep}{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["bash", "build.sh"],
+        cwd=backend_dir,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (
+        tauri_bin_dir / "RaindropNoteBackend" / "RaindropNoteBackend-x86_64-test-platform"
+    ).exists()
+    assert not (backend_dir / ".env").exists()
+
+
+def test_build_bat_uses_backend_relative_assets_from_repo_root():
+    build_bat = (Path(__file__).parents[1] / "build.bat").read_text(encoding="utf-8")
+
+    assert "copy backend\\.env.example backend\\.env" in build_bat
+    assert '--add-data "backend\\app\\db\\builtin_providers.json;."' in build_bat
+    assert '--add-data "backend\\.env;."' in build_bat
+
+
+def test_tauri_sidecar_contract_matches_backend_build_scripts():
+    repo_root = Path(__file__).parents[2]
+    tauri_dir = repo_root / "BillNote_frontend" / "src-tauri"
+    tauri_config = json.loads((tauri_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+    capabilities = json.loads(
+        (tauri_dir / "capabilities" / "default.json").read_text(encoding="utf-8")
+    )
+    build_sh = (repo_root / "backend" / "build.sh").read_text(encoding="utf-8")
+    build_bat = (repo_root / "backend" / "build.bat").read_text(encoding="utf-8")
+
+    external_bins = tauri_config["bundle"]["externalBin"]
+    shell_permissions = [
+        permission
+        for permission in capabilities["permissions"]
+        if isinstance(permission, dict) and permission["identifier"] == "shell:allow-execute"
+    ]
+
+    assert external_bins == ["bin/RaindropNoteBackend/RaindropNoteBackend"]
+    assert shell_permissions[0]["allow"] == [
+        {"name": "RaindropNoteBackend", "sidecar": True}
+    ]
+    assert "RaindropNoteBackend-$TARGET_TRIPLE" in build_sh
+    assert "RaindropNoteBackend-%TARGET_TRIPLE%.exe" in build_bat
+
+
+def test_desktop_workflow_uses_host_targets_without_unused_matrix_target():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+    package_json = json.loads(
+        (repo_root / "BillNote_frontend" / "package.json").read_text(encoding="utf-8")
+    )
+
+    assert "platform: macos-latest" in workflow
+    assert "platform: ubuntu-22.04" in workflow
+    assert "platform: windows-latest" in workflow
+    assert "target:" not in workflow
+    assert "pnpm tauri build --target" not in workflow
+    assert package_json["scripts"]["desktop:build"] == "tauri build"
+    assert package_json["scripts"]["desktop:build:ci"] == "tauri build --ci"
+    assert "pnpm install --frozen-lockfile" in workflow
+    assert "pnpm desktop:build:ci" in workflow
+
+
+def test_desktop_workflow_uses_the_project_pnpm_version():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+    package_json = json.loads(
+        (repo_root / "BillNote_frontend" / "package.json").read_text(encoding="utf-8")
+    )
+
+    assert package_json["packageManager"] == "pnpm@10.33.0"
+    assert "version: 'latest'" not in workflow
+    assert "version: '10.33.0'" in workflow
+
+
+def test_desktop_workflow_fails_when_release_artifacts_are_missing():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+
+    assert 'ARTIFACT_PATTERNS=("*.dmg")' in workflow
+    assert 'ARTIFACT_PATTERNS=("*.deb" "*.AppImage")' in workflow
+    assert 'ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")' in workflow
+    assert '[[ "$FOUND_ARTIFACTS" -gt 0 ]]' in workflow
+    assert 'No release artifacts found for $RUNNER_OS' in workflow
+    assert "-exec cp {} release-artifacts/ \\; 2>/dev/null || true" not in workflow
+
+
+def test_desktop_workflow_names_checksum_files_per_platform():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+
+    assert 'CHECKSUM_FILE="SHA256SUMS-${{ matrix.platform }}.txt"' in workflow
+    assert 'cat "$CHECKSUM_FILE"' in workflow
+    assert "> SHA256SUMS.txt" not in workflow
+    assert "cat SHA256SUMS.txt" not in workflow
+
+
+def test_desktop_workflow_selects_available_checksum_tool_per_runner():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+
+    assert "if command -v sha256sum >/dev/null 2>&1; then" in workflow
+    assert "CHECKSUM_COMMAND=(sha256sum)" in workflow
+    assert "CHECKSUM_COMMAND=(shasum -a 256)" in workflow
+    assert '"${CHECKSUM_COMMAND[@]}" * > "$CHECKSUM_FILE"' in workflow
+    assert 'sha256sum * > "$CHECKSUM_FILE" 2>/dev/null || shasum -a 256 * > "$CHECKSUM_FILE"' not in workflow
+
+
+def test_release_job_verifies_all_platform_artifacts_before_publishing():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+
+    assert "Verify downloaded release artifacts" in workflow
+    for platform in ["macos-latest", "ubuntu-22.04", "windows-latest"]:
+        assert f"SHA256SUMS-{platform}.txt" in workflow
+    assert "Missing checksum file:" in workflow
+    assert "cd all-artifacts" in workflow
+    assert 'sha256sum -c "$checksum"' in workflow
+
+
+def test_local_packaging_helper_and_runbook_use_raindrop_names():
+    repo_root = Path(__file__).parents[2]
+    helper = (repo_root / "tools" / "package_bilinote.py").read_text(encoding="utf-8")
+    runbook = (repo_root / "docs" / "runbooks" / "desktop-packaging.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[雨滴笔记助手]" in helper
+    assert "RaindropNote-ci-" in helper
+    assert "雨滴笔记助手 桌面端打包辅助脚本" in helper
+    assert "[BiliNote]" not in helper
+    assert "BiliNote-ci-" not in helper
+    assert "BiliNote 桌面端打包辅助脚本" not in helper
+
+    assert "# 雨滴笔记助手 Desktop Packaging" in runbook
+    assert "打包雨滴笔记助手.command" in runbook
+    assert "BiliNote" not in runbook
+
+
+def test_docker_publish_workflow_uses_raindrop_names():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "docker-build.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "raindrop-note-data:/app/backend/data" in workflow
+    assert "--name raindrop-note" in workflow
+    assert "bilinote" not in workflow.lower()
+
+
+def test_complete_dockerfile_uses_frozen_frontend_lockfile():
+    repo_root = Path(__file__).parents[2]
+    dockerfile = (repo_root / "Dockerfile.complete").read_text(encoding="utf-8")
+
+    assert "COPY ./BillNote_frontend/package.json ./BillNote_frontend/pnpm-lock.yaml ./" in dockerfile
+    assert "RUN pnpm install --frozen-lockfile" in dockerfile

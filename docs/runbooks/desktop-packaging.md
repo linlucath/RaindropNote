@@ -1,4 +1,4 @@
-# BiliNote Desktop Packaging
+# 雨滴笔记助手 Desktop Packaging
 
 ## Overview
 
@@ -11,7 +11,7 @@
 
 桌面脚本位置：
 
-- `/Users/linlu/Desktop/打包BiliNote.command`
+- `/Users/linlu/Desktop/打包雨滴笔记助手.command`
 
 默认双击行为：
 
@@ -21,8 +21,8 @@
 也可以在终端里手动调用：
 
 ```bash
-/Users/linlu/Desktop/打包BiliNote.command build-mac
-/Users/linlu/Desktop/打包BiliNote.command download-ci --platform windows-latest
+/Users/linlu/Desktop/打包雨滴笔记助手.command build-mac
+/Users/linlu/Desktop/打包雨滴笔记助手.command download-ci --platform windows-latest
 ```
 
 ## Local mac Prerequisites
