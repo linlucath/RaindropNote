@@ -27,6 +27,7 @@ from app.services import subtitle_audio_meta
 from app.services import subtitle_transcripts
 from app.services.task_runtime import default_note_output_dir
 from app.services import transcript_markdown
+from app.utils.path_helper import get_screenshot_dir
 
 # ------------------ 环境变量与全局配置 ------------------
 
@@ -41,7 +42,7 @@ BACKEND_BASE_URL = f"{API_BASE_URL}:{BACKEND_PORT}"
 # 输出目录（用于缓存音频、转写、Markdown 文件，以及存储截图）
 NOTE_OUTPUT_DIR = default_note_output_dir()
 NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-IMAGE_OUTPUT_DIR = os.getenv("OUT_DIR", "./static/screenshots")
+IMAGE_OUTPUT_DIR = get_screenshot_dir()
 # 图片基础 URL（用于生成 Markdown 中的图片链接，需前端静态目录对应）
 IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
 

@@ -9,13 +9,13 @@ from app.services import task_runtime
 
 class TestTaskRuntime(unittest.TestCase):
     def test_note_and_batch_output_dirs_come_from_note_output_env(self):
-        with patch.dict(os.environ, {"NOTE_OUTPUT_DIR": "/tmp/bilinote-notes"}):
+        with patch.dict(os.environ, {"NOTE_OUTPUT_DIR": "/tmp/raindrop-note-notes"}):
             note_dir = task_runtime.default_note_output_dir()
 
-        self.assertEqual(note_dir, Path("/tmp/bilinote-notes"))
+        self.assertEqual(note_dir, Path("/tmp/raindrop-note-notes"))
         self.assertEqual(
             task_runtime.default_batch_output_dir(note_dir),
-            Path("/tmp/bilinote-notes") / "batches",
+            Path("/tmp/raindrop-note-notes") / "batches",
         )
 
     def test_default_batch_output_dir_derives_from_current_env(self):

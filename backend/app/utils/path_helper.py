@@ -22,7 +22,7 @@ def get_model_dir(subdir: str = "whisper") -> str:
     # 判断是否为打包状态（PyInstaller）
     if getattr(sys, 'frozen', False):
         # exe 执行，放在 APPDATA 或 ~/.cache 下
-        base_dir = os.path.join(os.getenv("APPDATA") or str(Path.home()), "BiliNote", "models")
+        base_dir = os.path.join(os.getenv("APPDATA") or str(Path.home()), "RaindropNote", "models")
     else:
         # 开发时，相对项目根目录
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../models"))
@@ -48,3 +48,24 @@ def get_app_dir(subdir: str = "") -> str:
     full_path = os.path.join(base_dir, subdir)
     os.makedirs(full_path, exist_ok=True)
     return full_path
+
+
+def get_static_dir() -> str:
+    return get_app_dir("static")
+
+
+def get_uploads_dir() -> str:
+    return get_app_dir("uploads")
+
+
+def get_screenshot_dir() -> str:
+    configured_dir = os.getenv("OUT_DIR")
+    if configured_dir:
+        screenshot_path = Path(configured_dir)
+        if not screenshot_path.is_absolute():
+            screenshot_path = Path(get_app_dir()) / screenshot_path
+    else:
+        screenshot_path = Path(get_static_dir()) / "screenshots"
+
+    screenshot_path.mkdir(parents=True, exist_ok=True)
+    return str(screenshot_path)

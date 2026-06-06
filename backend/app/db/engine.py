@@ -2,11 +2,22 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
+from pathlib import Path
+
+from app.utils.path_helper import get_app_dir
 
 load_dotenv()
 
-# 默认 SQLite，如果想换 PostgreSQL 或 MySQL，可以直接改 .env
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bili_note.db")
+def resolve_database_url() -> str:
+    configured_url = os.getenv("DATABASE_URL")
+    if configured_url:
+        return configured_url
+
+    database_path = Path(get_app_dir()) / "raindrop_note.db"
+    return f"sqlite:///{database_path.as_posix()}"
+
+
+DATABASE_URL = resolve_database_url()
 
 # SQLite 需要特定连接参数，其他数据库不需要
 engine_args = {}
