@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -24,7 +25,7 @@ class PackagingError(RuntimeError):
 
 
 def info(message: str) -> None:
-    print(f"[BiliNote] {message}")
+    print(f"[雨滴笔记助手] {message}")
 
 
 def run(cmd: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
@@ -107,6 +108,48 @@ def latest_matching_artifact(pattern: str) -> Path:
     return matches[0]
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_downloaded_artifacts(target_dir: Path, platform_name: str) -> None:
+    resolved_target_dir = target_dir.resolve()
+    checksum_file = target_dir / f"SHA256SUMS-{platform_name}.txt"
+    if not checksum_file.is_file():
+        raise PackagingError(f"缺少校验和文件: {checksum_file.name}")
+
+    checked = 0
+    for line in checksum_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            expected_hash, artifact_name = line.split(None, 1)
+        except ValueError as exc:
+            raise PackagingError(f"校验和文件格式无效: {checksum_file.name}") from exc
+
+        artifact_name = artifact_name.lstrip("*").strip()
+        artifact_path = target_dir / artifact_name
+        resolved_artifact_path = artifact_path.resolve()
+        if not resolved_artifact_path.is_relative_to(resolved_target_dir):
+            raise PackagingError(f"校验文件路径无效: {artifact_name}")
+        if not artifact_path.is_file():
+            raise PackagingError(f"校验文件不存在: {artifact_name}")
+
+        actual_hash = sha256_file(resolved_artifact_path)
+        if actual_hash.lower() != expected_hash.lower():
+            raise PackagingError(f"校验失败: {artifact_name}")
+        checked += 1
+
+    if checked == 0:
+        raise PackagingError(f"校验和文件为空: {checksum_file.name}")
+
+
 def build_mac(args: argparse.Namespace) -> int:
     if platform.system() != "Darwin":
         raise PackagingError("mac 打包只能在 macOS 上执行。")
@@ -125,7 +168,7 @@ def build_mac(args: argparse.Namespace) -> int:
         run(["pnpm", "install", "--frozen-lockfile"], cwd=FRONTEND_DIR, env=env)
 
     run(["bash", "./backend/build.sh"], cwd=REPO_ROOT, env=env)
-    run(["pnpm", "tauri", "build"], cwd=FRONTEND_DIR, env=env)
+    run(["pnpm", "desktop:build"], cwd=FRONTEND_DIR, env=env)
 
     artifact = latest_matching_artifact("src-tauri/target/release/bundle/**/*.dmg")
     copied = copy_artifact(artifact, DOWNLOADS_DIR)
@@ -186,7 +229,7 @@ def download_ci(args: argparse.Namespace) -> int:
         raise PackagingError(f"工作流已完成，但结果为 `{conclusion}`，请先检查 GitHub Actions 日志。")
 
     artifact_name = f"artifacts-{args.platform}"
-    target_dir = DOWNLOADS_DIR / f"BiliNote-ci-{sanitize_name(branch)}-{run_id}"
+    target_dir = DOWNLOADS_DIR / f"RaindropNote-ci-{sanitize_name(branch)}-{run_id}"
     if target_dir.exists():
         shutil.rmtree(target_dir)
     ensure_directory(target_dir)
@@ -196,12 +239,13 @@ def download_ci(args: argparse.Namespace) -> int:
         cwd=REPO_ROOT,
         env=env,
     )
+    verify_downloaded_artifacts(target_dir, args.platform)
     info(f"CI 产物已下载到: {target_dir}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="BiliNote 桌面端打包辅助脚本")
+    parser = argparse.ArgumentParser(description="雨滴笔记助手 桌面端打包辅助脚本")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     mac_parser = subparsers.add_parser("build-mac", help="在当前 mac 上构建 dmg 并复制到下载目录")

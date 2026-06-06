@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+set "TEMP_ENV_CREATED=0"
 
 REM 切换到脚本所在目录的上级，也就是项目根目录
 cd /d %~dp0..
@@ -27,13 +28,16 @@ REM --- 核心修改部分开始 ---
 
 REM 步骤 1: 为了避免 PyInstaller 的解析歧义，我们先手动复制文件
 echo 为打包准备 .env 文件...
-copy .env.example backend\.env
+if not exist backend\.env (
+  copy backend\.env.example backend\.env
+  set "TEMP_ENV_CREATED=1"
+)
 
 REM 步骤 2: 执行 PyInstaller 打包，直接添加已存在的 .env 文件
 echo 开始 PyInstaller 打包...
 pyinstaller ^
   -y ^
-  --name BiliNoteBackend ^
+  --name RaindropNoteBackend ^
   --paths backend ^
   --distpath BillNote_frontend\src-tauri\bin ^
   --workpath backend\build ^
@@ -41,23 +45,25 @@ pyinstaller ^
   --hidden-import uvicorn ^
   --hidden-import fastapi ^
   --hidden-import starlette ^
-  --add-data "app\db\builtin_providers.json;." ^
-  --add-data ".env;." ^
+  --add-data "backend\app\db\builtin_providers.json;." ^
+  --add-data "backend\.env;." ^
   backend\main.py
 
 REM 步骤 3: 清理在项目根目录创建的临时 .env 文件
-echo 清理临时的 .env 文件...
-del backend\.env
+if "%TEMP_ENV_CREATED%"=="1" (
+  echo 清理临时的 .env 文件...
+  del backend\.env
+)
 
 REM --- 核心修改部分结束 ---
 
 
 REM 重命名生成的可执行文件为符合 Tauri 要求的名称
-move /Y BillNote_frontend\src-tauri\bin\BiliNoteBackend\BiliNoteBackend.exe BillNote_frontend\src-tauri\bin\BiliNoteBackend\BiliNoteBackend-%TARGET_TRIPLE%.exe
+move /Y BillNote_frontend\src-tauri\bin\RaindropNoteBackend\RaindropNoteBackend.exe BillNote_frontend\src-tauri\bin\RaindropNoteBackend\RaindropNoteBackend-%TARGET_TRIPLE%.exe
 
 echo PyInstaller 打包完成：
-dir BillNote_frontend\src-tauri\bin\BiliNoteBackend
+dir BillNote_frontend\src-tauri\bin\RaindropNoteBackend
 
-echo 请检查 BillNote_frontend\src-tauri\bin\BiliNoteBackend 目录，确认其中包含了名为 .env 的【文件】。
+echo 请检查 BillNote_frontend\src-tauri\bin\RaindropNoteBackend 目录，确认其中包含了名为 .env 的【文件】。
 
 endlocal

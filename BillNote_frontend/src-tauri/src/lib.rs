@@ -1,10 +1,10 @@
-use tauri::{Manager, Emitter};
-use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
-use std::env;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tauri::{Emitter, Manager};
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -40,14 +40,17 @@ pub fn run() {
             all_env_vars.insert("PATH".to_string(), enhanced_path);
 
             // 打印一些关键环境变量用于调试
-            println!("Enhanced PATH: {}", all_env_vars.get("PATH").unwrap_or(&"Not found".to_string()));
+            println!(
+                "Enhanced PATH: {}",
+                all_env_vars.get("PATH").unwrap_or(&"Not found".to_string())
+            );
             println!("Total environment variables: {}", all_env_vars.len());
 
             // 检查 ffmpeg 是否在 PATH 中可用
             check_ffmpeg_availability();
 
             // 启动 Python 后端侧车
-            let mut sidecar_command = app.shell().sidecar("BiliNoteBackend").unwrap();
+            let mut sidecar_command = app.shell().sidecar("RaindropNoteBackend").unwrap();
 
             // 设置所有环境变量到 sidecar
             for (key, value) in &all_env_vars {
@@ -142,6 +145,7 @@ fn push_env_candidates(files: &mut Vec<PathBuf>, start: &Path) {
     }
 
     push_unique_env_file(files, start.join(".env"));
+    push_unique_env_file(files, start.join("_internal").join(".env"));
 }
 
 fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -187,10 +191,7 @@ fn parse_env_file(path: &Path) -> Result<HashMap<String, String>, std::io::Error
             value.truncate(comment_index);
             value = value.trim().to_string();
         }
-        value = value
-            .trim_matches('"')
-            .trim_matches('\'')
-            .to_string();
+        value = value.trim_matches('"').trim_matches('\'').to_string();
 
         vars.insert(key.to_string(), value);
     }
@@ -230,7 +231,11 @@ fn get_additional_binary_paths() -> Vec<String> {
 
 // 增强 PATH 环境变量
 fn enhance_path_variable(current_path: &str, additional_paths: &[String]) -> String {
-    let path_separator = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let path_separator = if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    };
 
     let mut paths: Vec<String> = additional_paths.to_vec();
 
@@ -291,12 +296,20 @@ fn find_executable_path(executable_name: String) -> Option<String> {
     use std::process::Command;
 
     // 首先尝试直接执行
-    if Command::new(&executable_name).arg("--version").output().is_ok() {
+    if Command::new(&executable_name)
+        .arg("--version")
+        .output()
+        .is_ok()
+    {
         return Some(executable_name);
     }
 
     // 使用 which/where 命令查找
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let which_cmd = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
 
     if let Ok(output) = Command::new(which_cmd).arg(&executable_name).output() {
         if output.status.success() {
@@ -326,10 +339,7 @@ fn find_executable_path(executable_name: String) -> Option<String> {
 
 // Tauri 命令：使用完整环境变量运行命令
 #[tauri::command]
-async fn run_command_with_env(
-    program: String,
-    args: Vec<String>
-) -> Result<String, String> {
+async fn run_command_with_env(program: String, args: Vec<String>) -> Result<String, String> {
     use std::process::Command;
 
     let mut cmd = Command::new(&program);
@@ -354,7 +364,7 @@ async fn run_command_with_env(
                 Err(String::from_utf8_lossy(&output.stderr).to_string())
             }
         }
-        Err(e) => Err(format!("Failed to execute {}: {}", program, e))
+        Err(e) => Err(format!("Failed to execute {}: {}", program, e)),
     }
 }
 
@@ -364,42 +374,30 @@ async fn test_ffmpeg_access() -> Result<String, String> {
     run_command_with_env("ffmpeg".to_string(), vec!["-version".to_string()]).await
 }
 
-// 可选：添加一个函数来动态更新 sidecar 的环境变量
-#[tauri::command]
-async fn update_sidecar_environment(
-    app_handle: tauri::AppHandle,
-    additional_env_vars: HashMap<String, String>
-) -> Result<(), String> {
-    // 这个函数可以用来在运行时更新环境变量
-    // 注意：这需要重启 sidecar 才能生效
-
-    for (key, value) in additional_env_vars {
-        env::set_var(key, value);
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::push_env_candidates;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_temp_dir() -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("bilinote-env-tests-{suffix}"))
+        let counter = TEMP_DIR_COUNTER.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!("raindrop-note-env-tests-{suffix}-{counter}"))
     }
 
     #[test]
     fn push_env_candidates_stops_at_repo_root_instead_of_including_home_env() {
         let root = unique_temp_dir();
         let home = root.join("home");
-        let project = home.join("BiliNote");
+        let project = home.join("RaindropNote");
         let start = project.join("BillNote_frontend").join("src-tauri");
 
         fs::create_dir_all(project.join("backend")).unwrap();
@@ -411,6 +409,26 @@ mod tests {
         push_env_candidates(&mut files, &start);
 
         assert_eq!(files, vec![project.join(".env")]);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn push_env_candidates_includes_packaged_internal_env_file() {
+        let root = unique_temp_dir();
+        let exe_dir = root.join("RaindropNote.app").join("Contents").join("MacOS");
+
+        fs::create_dir_all(exe_dir.join("_internal")).unwrap();
+        fs::write(
+            exe_dir.join("_internal").join(".env"),
+            "BACKEND_PORT=8483\n",
+        )
+        .unwrap();
+
+        let mut files = Vec::new();
+        push_env_candidates(&mut files, &exe_dir);
+
+        assert_eq!(files, vec![exe_dir.join("_internal").join(".env")]);
 
         fs::remove_dir_all(root).unwrap();
     }

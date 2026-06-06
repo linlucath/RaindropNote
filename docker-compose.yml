@@ -1,7 +1,7 @@
 
 services:
   backend:
-    container_name: bilinote-backend
+    container_name: raindrop-note-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -27,7 +27,7 @@ services:
     mem_limit: 4g
 
   frontend:
-    container_name: bilinote-frontend
+    container_name: raindrop-note-frontend
     build:
       context: .
       dockerfile: BillNote_frontend/Dockerfile
@@ -39,7 +39,7 @@ services:
     mem_limit: 512m
 
   nginx:
-    container_name: bilinote-nginx
+    container_name: raindrop-note-nginx
     image: nginx:1.25-alpine
     ports:
       - "${APP_PORT}:80"
