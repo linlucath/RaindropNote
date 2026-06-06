@@ -1,9 +1,11 @@
-import { FC, useEffect, useState } from 'react'
+import { FC, lazy, Suspense, useEffect, useState } from 'react'
 import HomeLayout from '@/layouts/HomeLayout.tsx'
-import NoteForm from '@/pages/HomePage/components/NoteForm.tsx'
-import MarkdownViewer from '@/pages/HomePage/components/MarkdownViewer.tsx'
 import { useTaskStore } from '@/store/taskStore'
-import History from '@/pages/HomePage/components/History.tsx'
+
+const NoteForm = lazy(() => import('@/pages/HomePage/components/NoteForm.tsx'))
+const MarkdownViewer = lazy(() => import('@/pages/HomePage/components/MarkdownViewer.tsx'))
+const History = lazy(() => import('@/pages/HomePage/components/History.tsx'))
+
 type ViewStatus = 'idle' | 'loading' | 'success' | 'failed'
 export const HomePage: FC = () => {
   const tasks = useTaskStore(state => state.tasks)
@@ -34,9 +36,21 @@ export const HomePage: FC = () => {
   // }, [tasks]);
   return (
     <HomeLayout
-      NoteForm={<NoteForm />}
-      Preview={<MarkdownViewer status={status} />}
-      History={<History />}
+      NoteForm={
+        <Suspense fallback={null}>
+          <NoteForm />
+        </Suspense>
+      }
+      Preview={
+        <Suspense fallback={null}>
+          <MarkdownViewer status={status} />
+        </Suspense>
+      }
+      History={
+        <Suspense fallback={null}>
+          <History />
+        </Suspense>
+      }
     />
   )
 }

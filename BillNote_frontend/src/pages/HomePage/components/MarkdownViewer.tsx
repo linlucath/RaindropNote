@@ -16,7 +16,15 @@ import Error from '@/components/Lottie/error.tsx'
 import Loading from '@/components/Lottie/Loading.tsx'
 import Idle from '@/components/Lottie/Idle.tsx'
 import StepBar from '@/pages/HomePage/components/StepBar.tsx'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
+import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
+import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
+import javascript from 'react-syntax-highlighter/dist/esm/languages/prism/javascript'
+import json from 'react-syntax-highlighter/dist/esm/languages/prism/json'
+import markup from 'react-syntax-highlighter/dist/esm/languages/prism/markup'
+import python from 'react-syntax-highlighter/dist/esm/languages/prism/python'
+import tsx from 'react-syntax-highlighter/dist/esm/languages/prism/tsx'
+import typescript from 'react-syntax-highlighter/dist/esm/languages/prism/typescript'
 import { atomDark as codeStyle } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import Zoom from 'react-medium-image-zoom'
 import 'react-medium-image-zoom/dist/styles.css'
@@ -59,6 +67,16 @@ const steps = [
 
 const remarkPlugins = [gfm, remarkMath]
 const rehypePlugins = [rehypeKatex]
+
+SyntaxHighlighter.registerLanguage('bash', bash)
+SyntaxHighlighter.registerLanguage('css', css)
+SyntaxHighlighter.registerLanguage('html', markup)
+SyntaxHighlighter.registerLanguage('javascript', javascript)
+SyntaxHighlighter.registerLanguage('json', json)
+SyntaxHighlighter.registerLanguage('jsx', tsx)
+SyntaxHighlighter.registerLanguage('python', python)
+SyntaxHighlighter.registerLanguage('tsx', tsx)
+SyntaxHighlighter.registerLanguage('typescript', typescript)
 
 /**
  * 构建 ReactMarkdown components 对象，baseURL 用于修正图片路径。
@@ -488,7 +506,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         <Idle />
         <div className="text-center">
           <p className="text-lg font-bold">输入视频链接并点击"生成文字稿"</p>
-          <p className="mt-2 text-xs text-neutral-500">支持哔哩哔哩、YouTube 、抖音等视频平台</p>
+          <p className="mt-2 text-xs text-neutral-500">支持多来源内容，请确认你有权处理该内容</p>
         </div>
       </div>
     )
@@ -592,7 +610,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 <ArrowRight className="text-primary h-8 w-8" />
               </div>
               <p className="mb-2 text-neutral-600">输入视频链接并点击"生成文字稿"按钮</p>
-              <p className="text-xs text-neutral-500">支持哔哩哔哩、YouTube等视频网站</p>
+              <p className="text-xs text-neutral-500">支持多来源内容，请确认你有权处理该内容</p>
             </div>
           </div>
         )}
