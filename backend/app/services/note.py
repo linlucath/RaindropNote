@@ -7,17 +7,15 @@ from pydantic import HttpUrl
 from dotenv import load_dotenv
 
 from app.downloaders.base import Downloader
-from app.enmus.exception import NoteErrorEnum
 from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
-from app.exceptions.note import NoteError
 from app.gpt.base import GPT
 from app.models.notes_model import AudioDownloadResult, NoteResult
 from app.models.transcriber_model import TranscriptResult
-from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.progress_state import cancel_task, is_task_cancel_requested, write_task_status
 from app.services import note_gpt_provider
 from app.services import note_completion
+from app.services import note_downloader_provider
 from app.services import note_generation_plan
 from app.services import note_llm_markdown
 from app.services import note_markdown_postprocess
@@ -365,21 +363,7 @@ class NoteGenerator:
         :param platform: 平台标识，需在 SUPPORT_PLATFORM_MAP 中
         :return: 对应的 Downloader 子类实例
         """
-        downloader_cls = SUPPORT_PLATFORM_MAP.get(platform)
-        logger.debug(f"实例化下载器 -  {platform}")
-        instance = None
-        if not downloader_cls:
-            logger.error(f"不支持的平台：{platform}")
-            raise NoteError(code=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code,
-                            message=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message)
-        try:
-            instance = downloader_cls
-        except Exception as e:
-            logger.error(f"实例化下载器失败：{e}")
-
-
-        logger.info(f"使用下载器：{downloader_cls.__class__}")
-        return instance
+        return note_downloader_provider.build_downloader(platform, log=logger)
 
     @staticmethod
     def _update_status(
