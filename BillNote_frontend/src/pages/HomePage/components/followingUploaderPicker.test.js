@@ -14,7 +14,7 @@ test('FollowingUploaderPicker avoids native buttons for uploader rows', () => {
 })
 
 test('FollowingUploaderPicker no longer exposes uploader search controls', () => {
-  assert.doesNotMatch(source, /按昵称搜索关注的 UP 主/)
+  assert.doesNotMatch(source, /按昵称搜索关注的创作者/)
   assert.doesNotMatch(source, />\s*搜索\s*</)
 })
 

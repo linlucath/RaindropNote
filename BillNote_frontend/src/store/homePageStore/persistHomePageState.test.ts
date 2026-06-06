@@ -26,7 +26,7 @@ test('buildPersistedHomePageState keeps the home page draft and preview context'
       signature: '{"source":"followings","mid":"42","limit":20}',
       selectedUploader: {
         mid: '42',
-        name: '测试 UP 主',
+        name: '测试创作者',
         sign: 'hello world',
       },
     },

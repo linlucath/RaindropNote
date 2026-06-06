@@ -4,7 +4,7 @@ from fastapi import FastAPI
 def create_app(lifespan) -> FastAPI:
     from .routers import note, provider, model, config, batch, bilibili, favorite
 
-    app = FastAPI(title="BiliNote",lifespan=lifespan)
+    app = FastAPI(title="雨滴笔记助手",lifespan=lifespan)
     app.include_router(note.router, prefix="/api")
     app.include_router(provider.router, prefix="/api")
     app.include_router(model.router,prefix="/api")

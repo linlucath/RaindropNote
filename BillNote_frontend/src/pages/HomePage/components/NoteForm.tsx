@@ -126,7 +126,7 @@ const formSchema = z
       if (source_type === 'uploader_batch') {
         if (uploader_source_mode === 'manual') {
           if (!video_url) {
-            ctx.addIssue({ code: 'custom', message: 'UP 主主页链接不能为空', path: ['video_url'] })
+            ctx.addIssue({ code: 'custom', message: '创作者主页链接不能为空', path: ['video_url'] })
             return
           }
 
@@ -143,14 +143,14 @@ const formSchema = z
             if (!isBilibiliUploaderUrl(video_url)) {
               ctx.addIssue({
                 code: 'custom',
-                message: '请输入 B 站 UP 主主页链接',
+                message: '请输入有效的创作者主页链接',
                 path: ['video_url'],
               })
             }
           } else {
             ctx.addIssue({
               code: 'custom',
-              message: '请输入 B 站 UP 主主页或 YouTube 频道主页链接',
+              message: '请输入有效的创作者或频道主页链接',
               path: ['video_url'],
             })
           }
@@ -576,11 +576,11 @@ const NoteForm = () => {
         ? await form.trigger(['video_url'])
         : true
     if (!valid) {
-      toast.error('请先填写有效的 B 站 UP 主主页或 YouTube 频道主页链接')
+      toast.error('请先填写有效的创作者或频道主页链接')
       return
     }
     if (!dynamicsSource && sourceMode === 'followings' && !selectedUploader) {
-      toast.error('请先从关注列表中选择一个 UP 主')
+      toast.error('请先从关注列表中选择一个创作者')
       return
     }
     const effectivePageSize = dynamicsSource
@@ -784,10 +784,10 @@ const NoteForm = () => {
 
   const getPreviewRefreshErrorMessage = (values: NoteFormValues) =>
     values.source_type === 'dynamics'
-      ? '关注动态已变更，请等待列表刷新后再继续'
+      ? '订阅动态已变更，请等待列表刷新后再继续'
       : values.uploader_source_mode === 'followings'
-        ? '已选择的 UP 主已变更，请等待列表刷新后再继续'
-        : 'UP 主链接已变更，请先刷新视频列表'
+        ? '已选择的创作者已变更，请等待列表刷新后再继续'
+        : '创作者链接已变更，请先刷新视频列表'
 
   const focusTask = (taskId: string) => {
     setCurrentTask(taskId)
@@ -1007,8 +1007,8 @@ const NoteForm = () => {
                       <SelectContent>
                         {[
                           { value: 'single', label: '单视频' },
-                          { value: 'uploader_batch', label: 'UP 主批量' },
-                          { value: 'dynamics', label: '关注动态' },
+                          { value: 'uploader_batch', label: '创作者主页' },
+                          { value: 'dynamics', label: '订阅动态' },
                         ].map(option => (
                           <SelectItem key={option.value} value={option.value}>
                             {option.label}
@@ -1082,7 +1082,7 @@ const NoteForm = () => {
                             placeholder={
                               uploaderBatchMode
                                 ? 'https://space.bilibili.com/123456 或 https://www.youtube.com/@channel_handle'
-                                : '粘贴 B站 / YouTube / 抖音 / 快手链接'
+                                : '粘贴你有权使用的视频或音频链接'
                             }
                             {...field}
                             onChange={event => {
@@ -1115,7 +1115,7 @@ const NoteForm = () => {
                     />
                     {selectedUploader ? (
                       <div className="flex flex-wrap items-center gap-2 rounded-md bg-white px-3 py-2 text-xs text-neutral-600">
-                        <span>已选择 UP 主</span>
+                        <span>已选择创作者</span>
                         <span className="font-medium text-neutral-900">
                           {selectedUploader.name}
                         </span>
@@ -1142,16 +1142,16 @@ const NoteForm = () => {
                     dynamicsMode
                       ? '暂无动态投稿'
                       : uploaderSourceMode === 'followings'
-                        ? '请选择 UP 主'
+                        ? '请选择创作者'
                         : '暂无视频标题'
                   }
                   stale={previewDirty}
                   staleMessage={
                     dynamicsMode
-                      ? '关注动态条件已变更。'
+                      ? '订阅动态条件已变更。'
                       : uploaderSourceMode === 'followings'
-                        ? '所选 UP 主已变更。'
-                        : 'UP 主链接已变更。'
+                        ? '所选创作者已变更。'
+                        : '创作者链接已变更。'
                   }
                   onLoadMore={() => void loadPreviewBatchPage(false)}
                   onActivateVideo={video => {

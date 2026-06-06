@@ -82,8 +82,8 @@ export default function FollowingUploaderPicker({
 
   const emptyMessage = useMemo(() => {
     if (error) return error
-    if (configured === false) return '请先到设置页填写 Bilibili Cookie'
-    return '当前账号暂无可读取的关注 UP 主'
+    if (configured === false) return '请先到设置页填写平台 Cookie'
+    return '当前账号暂无可读取的关注创作者'
   }, [configured, error])
   const showInitialLoading = loading || (preloading && items.length === 0)
 
@@ -178,7 +178,7 @@ export default function FollowingUploaderPicker({
       {configured === false ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>请先到设置页填写 Bilibili Cookie，才能读取已关注的 UP 主列表。</AlertDescription>
+          <AlertDescription>请先到设置页填写平台 Cookie，才能读取已关注的创作者列表。</AlertDescription>
         </Alert>
       ) : null}
 
@@ -252,7 +252,7 @@ export default function FollowingUploaderPicker({
                       ) : null}
                     </span>
                     <span className="mt-1 line-clamp-2 block text-xs leading-5 text-neutral-500">
-                      {item.sign || '这个 UP 主还没有填写简介'}
+                      {item.sign || '这个创作者还没有填写简介'}
                     </span>
                   </span>
                 </div>

@@ -33,7 +33,7 @@ const SettingLayout = ({ Menu }: ISettingLayoutProps) => {
               <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl">
                 <img src={logo} alt="logo" className="h-full w-full object-contain" />
               </div>
-              <div className="text-2xl font-bold text-gray-800">BiliNote</div>
+              <div className="text-2xl font-bold text-gray-800">雨滴笔记助手</div>
             </Link>
             <div>
               <TooltipProvider>

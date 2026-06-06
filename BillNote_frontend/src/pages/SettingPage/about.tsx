@@ -1,140 +1,98 @@
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Github, ExternalLink, Download } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import logo from '@/assets/icon.svg'
 
+const features = [
+  { title: '学习材料整理', desc: '将有权使用的视频、音频或本地文件整理成可阅读的文字稿。' },
+  { title: 'AI 笔记生成', desc: '基于文字稿生成章节、重点、摘要和可继续编辑的 Markdown 笔记。' },
+  { title: '原文参照', desc: '保留分段转写结果，便于核对、修订和追溯上下文。' },
+  { title: '自定义模型', desc: '支持配置兼容的大模型服务和多种语音转写方案。' },
+  { title: '历史管理', desc: '自动保留生成记录，方便回看、收藏和继续整理。' },
+  { title: '本地优先', desc: '支持源码、Docker 和桌面端运行，适合个人工作流。' },
+]
+
+const boundaries = [
+  '仅处理你拥有权利、获得授权，或平台规则允许用于个人学习和整理的内容。',
+  '请勿用于绕过访问控制、会员限制、付费限制或其他技术保护措施。',
+  '请勿批量抓取、复制、存储或传播第三方平台内容。',
+  '生成结果可能包含识别错误或模型幻觉，正式引用前请自行核验。',
+]
+
 export default function AboutPage() {
-  const images = [
-    'https://common-1304618721.cos.ap-chengdu.myqcloud.com/20250504102850.png',
-    'https://common-1304618721.cos.ap-chengdu.myqcloud.com/20250504103028.png',
-    'https://common-1304618721.cos.ap-chengdu.myqcloud.com/20250504103304.png',
-    'https://common-1304618721.cos.ap-chengdu.myqcloud.com/20250504103625.png',
-  ]
   return (
-    <ScrollArea className={'h-full overflow-y-auto bg-white'}>
+    <ScrollArea className="h-full overflow-y-auto bg-white">
       <div className="container mx-auto px-4 py-12">
-        {/* Hero Section */}
-        <div className="mb-16 flex flex-col items-center justify-center text-center">
+        <div className="mb-14 flex flex-col items-center justify-center text-center">
           <div className="mb-4 flex items-center gap-4">
             <img
               src={logo}
-              alt="BiliNote Logo"
+              alt="雨滴笔记助手 Logo"
               width={50}
               height={50}
               className="rounded-lg"
             />
-            <h1 className="text-4xl font-bold">BiliNote v2.0.0</h1>
+            <h1 className="text-4xl font-bold">雨滴笔记助手</h1>
           </div>
-          <p className="text-muted-foreground mb-6 text-xl italic">
-            AI 视频文字稿生成工具 让 AI 为你整理校对后的文字稿
+          <p className="text-muted-foreground mb-6 max-w-3xl text-xl">
+            面向个人学习、研究和内容整理场景的 AI 视频文字稿与笔记工具。
           </p>
 
-          <div className="mb-8 flex flex-wrap justify-center gap-2">
+          <div className="flex flex-wrap justify-center gap-2">
             <Badge variant="secondary">MIT License</Badge>
             <Badge variant="secondary">React</Badge>
             <Badge variant="secondary">FastAPI</Badge>
-            <Badge variant="secondary">Docker Compose</Badge>
-            <Badge variant="secondary">Active</Badge>
-          </div>
-
-          <div className="flex flex-wrap justify-center gap-4">
-            <Button asChild>
-              <a href="https://www.bilinote.app" target="_blank">
-                <ExternalLink className="mr-2 h-4 w-4" />
-                体验 BiliNote
-              </a>
-            </Button>
-            <Button variant="outline" asChild>
-              <a href="https://github.com/JefferyHcool/BiliNote" target="_blank">
-                <Github className="mr-2 h-4 w-4" />
-                GitHub 仓库
-              </a>
-            </Button>
-            <Button variant="outline" asChild>
-              <a href="https://github.com/JefferyHcool/BiliNote/releases" target="_blank">
-                <Download className="mr-2 h-4 w-4" />
-                下载桌面版
-              </a>
-            </Button>
+            <Badge variant="secondary">Docker</Badge>
+            <Badge variant="secondary">Local First</Badge>
           </div>
         </div>
 
-        {/* Project Introduction */}
-        <section className="mb-16">
-          <h2 className="mb-6 text-center text-3xl font-bold">✨ 项目简介</h2>
-          <div className="mx-auto max-w-3xl text-center">
-            <p className="text-lg">
-              BiliNote 是一个开源的 AI 视频文字稿助手，支持通过哔哩哔哩、YouTube、抖音等视频链接，
-              自动提取内容并生成校对后的 Markdown 文字稿，方便阅读、搜索与二次整理。
-            </p>
-          </div>
+        <section className="mb-14">
+          <h2 className="mb-5 text-center text-3xl font-bold">项目定位</h2>
+          <p className="mx-auto max-w-3xl text-center text-lg leading-8">
+            雨滴笔记助手关注的是把已经合法获得的学习材料整理成自己的知识资产。它不是下载器、
+            搬运工具或内容分发服务，适合课程复盘、会议材料整理、公开讲座学习和本地音视频转写。
+          </p>
         </section>
 
-        {/* Features Section */}
-        <section className="mb-16">
-          <h2 className="mb-8 text-center text-3xl font-bold">🔧 功能特性</h2>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {[
-              { title: '多平台支持', desc: '支持 Bilibili、YouTube、抖音、快手等多个平台' },
-              { title: '校对文字稿', desc: '默认生成经过大模型校对的 Markdown 文字稿' },
-              { title: '自定义 GPT 配置', desc: '支持自行配置 GPT 大模型' },
-              { title: '本地音频转写', desc: '支持 Fast-Whisper 等本地模型音频转写' },
-              { title: '批量处理', desc: '支持按 UP 主或关注动态批量生成文字稿' },
-              { title: '历史记录', desc: '自动保留校对后的文字稿结果，方便回看' },
-              { title: '原文参照', desc: '可随时查看分段转写原文，核对文字稿内容' },
-            ].map((feature, index) => (
-              <Card key={index} className="h-full">
+        <section className="mb-14">
+          <h2 className="mb-8 text-center text-3xl font-bold">功能特性</h2>
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {features.map(feature => (
+              <Card key={feature.title} className="h-full">
                 <CardContent className="pt-2">
                   <h3 className="mb-2 text-xl font-semibold">{feature.title}</h3>
-                  <p className="text-muted-foreground">{feature.desc}</p>
+                  <p className="text-muted-foreground leading-7">{feature.desc}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
         </section>
 
-        {/* Screenshots Section */}
-        <section className="mb-16">
-          <h2 className="mb-8 text-center text-3xl font-bold">📸 截图预览</h2>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {images.map(num => (
-              <div key={num} className="overflow-hidden rounded-lg border shadow-sm">
-                <img
-                  src={num}
-                  alt={`BiliNote Screenshot ${num}`}
-                  width={600}
-                  height={400}
-                  className="w-full object-cover transition-transform hover:scale-105"
-                />
-              </div>
+        <section className="mb-14">
+          <h2 className="mb-8 text-center text-3xl font-bold">使用边界</h2>
+          <div className="mx-auto grid max-w-4xl grid-cols-1 gap-4 md:grid-cols-2">
+            {boundaries.map(item => (
+              <Card key={item}>
+                <CardContent className="pt-2">
+                  <p className="text-muted-foreground leading-7">{item}</p>
+                </CardContent>
+              </Card>
             ))}
           </div>
         </section>
 
-        {/* Quick Start Section */}
-        <section className="mb-16">
-          <h2 className="mb-8 text-center text-3xl font-bold">🚀 快速开始</h2>
+        <section className="mb-14">
+          <h2 className="mb-8 text-center text-3xl font-bold">快速开始</h2>
           <Tabs defaultValue="manual" className="mx-auto max-w-3xl">
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="manual">手动安装</TabsTrigger>
-              <TabsTrigger value="docker">Docker 部署</TabsTrigger>
+              <TabsTrigger value="manual">源码运行</TabsTrigger>
+              <TabsTrigger value="docker">Docker</TabsTrigger>
             </TabsList>
             <TabsContent value="manual" className="mt-6 space-y-6">
               <div>
-                <h3 className="mb-3 text-xl font-semibold">1. 克隆仓库</h3>
-                <div className="bg-muted rounded-md p-4 font-mono text-sm">
-                  git clone https://github.com/JefferyHcool/BiliNote.git
-                  <br />
-                  cd BiliNote
-                  <br />
-                  mv .env.example .env
-                </div>
-              </div>
-              <div>
-                <h3 className="mb-3 text-xl font-semibold">2. 启动后端（FastAPI）</h3>
+                <h3 className="mb-3 text-xl font-semibold">1. 启动后端</h3>
                 <div className="bg-muted rounded-md p-4 font-mono text-sm">
                   cd backend
                   <br />
@@ -144,9 +102,9 @@ export default function AboutPage() {
                 </div>
               </div>
               <div>
-                <h3 className="mb-3 text-xl font-semibold">3. 启动前端（Vite + React）</h3>
+                <h3 className="mb-3 text-xl font-semibold">2. 启动前端</h3>
                 <div className="bg-muted rounded-md p-4 font-mono text-sm">
-                  cd BiliNote_frontend
+                  cd BillNote_frontend
                   <br />
                   pnpm install
                   <br />
@@ -154,70 +112,29 @@ export default function AboutPage() {
                 </div>
               </div>
               <p>
-                访问：<code className="bg-muted rounded px-2 py-1">http://localhost:5173</code>
+                默认访问：<code className="bg-muted rounded px-2 py-1">http://localhost:3015</code>
               </p>
             </TabsContent>
             <TabsContent value="docker" className="mt-6 space-y-6">
               <div>
-                <h3 className="mb-3 text-xl font-semibold">1. 克隆仓库</h3>
+                <h3 className="mb-3 text-xl font-semibold">启动服务</h3>
                 <div className="bg-muted rounded-md p-4 font-mono text-sm">
-                  git clone https://github.com/JefferyHcool/BiliNote.git
+                  docker-compose up
                   <br />
-                  cd BiliNote
-                  <br />
-                  mv .env.example .env
+                  docker-compose -f docker-compose.gpu.yml up
                 </div>
               </div>
-              <div>
-                <h3 className="mb-3 text-xl font-semibold">2. 启动 Docker Compose</h3>
-                <div className="bg-muted rounded-md p-4 font-mono text-sm">
-                  docker compose up --build
-                </div>
-              </div>
-              <p>
-                默认端口：
-                <br />
-                前端：http://localhost:${'{FRONTEND_PORT}'}
-                <br />
-                后端：http://localhost:${'{BACKEND_PORT}'}
-                <br />
-                <span className="text-muted-foreground text-sm">
-                  .env 文件中可自定义端口与环境配置
-                </span>
+              <p className="text-muted-foreground">
+                Docker 入口端口由根目录 <code>.env</code> 中的 <code>APP_PORT</code> 控制。
               </p>
             </TabsContent>
           </Tabs>
         </section>
 
-        {/* Community Section */}
-        <section className="mb-16">
-          <h2 className="mb-8 text-center text-3xl font-bold">联系和加入社区</h2>
-          <div className="mx-auto max-w-3xl">
-            <div className="flex flex-col items-center justify-center gap-8">
-              <div className="text-center">
-                <h3 className="mb-3 text-xl font-semibold">BiliNote 交流 QQ 群</h3>
-                <p className="text-lg font-medium">785367111</p>
-              </div>
-              <div className="text-center">
-                <h3 className="mb-3 text-xl font-semibold">BiliNote 交流微信群</h3>
-                <div className="bg-muted mx-auto flex h-52 w-52 items-center justify-center rounded-md">
-                  <img src={'https://common-1304618721.cos.ap-chengdu.myqcloud.com/wechat.png'} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* License Section */}
-        <section className="mb-8 text-center">
-          <h2 className="mb-4 text-3xl font-bold">📜 License</h2>
+        <section className="text-center">
+          <h2 className="mb-4 text-3xl font-bold">License</h2>
           <p>MIT License</p>
         </section>
-
-        {/* Footer */}
-        <footer className="border-t pt-8 text-center">
-          <p className="mb-4">💬 你的支持与反馈是我持续优化的动力！欢迎 PR、提 issue、Star ⭐️</p>
-        </footer>
       </div>
     </ScrollArea>
   )

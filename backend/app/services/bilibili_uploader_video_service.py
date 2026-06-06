@@ -82,7 +82,7 @@ class BilibiliUploaderVideoService:
             UPLOADER_VIDEOS_API_URL,
             params=params,
             headers=headers,
-            fallback_error='获取 UP 主视频失败',
+            fallback_error='获取创作者视频失败',
             error_messages_by_code=UPLOADER_BUSINESS_ERROR_MESSAGES,
         )
         return payload.get('data') or {}
