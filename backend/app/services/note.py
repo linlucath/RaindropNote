@@ -119,11 +119,8 @@ class NoteGenerator:
             self._cancel_if_requested(task_id)
             self._update_status(task_id, TaskStatus.PARSING, platform=platform)
 
-            # 获取下载器与 GPT 实例
-
             downloader = self._get_downloader(platform)
             self._cancel_if_requested(task_id)
-            gpt = None
 
             cache_paths = note_generation_plan.build_cache_paths(NOTE_OUTPUT_DIR, task_id)
             # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
