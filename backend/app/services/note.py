@@ -7,7 +7,6 @@ from pydantic import HttpUrl
 from dotenv import load_dotenv
 
 from app.downloaders.base import Downloader
-from app.db.video_task_dao import delete_task_by_task_id, delete_task_by_video, insert_video_task
 from app.enmus.exception import NoteErrorEnum
 from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
@@ -23,6 +22,7 @@ from app.services import note_generation_plan
 from app.services import note_llm_markdown
 from app.services import note_markdown_postprocess
 from app.services import note_media_download
+from app.services import note_records
 from app.services import note_result_payload
 from app.services import note_transcript_source
 from app.services import subtitle_audio_meta
@@ -265,16 +265,12 @@ class NoteGenerator:
         :param task_id: 任务 ID
         :return: 删除的记录数
         """
-        if task_id:
-            logger.info(f"删除笔记记录 (task_id={task_id})")
-            return delete_task_by_task_id(task_id)
-
-        if not video_id or not platform:
-            logger.warning("删除笔记记录失败：缺少 task_id，且未提供完整的 video_id/platform")
-            return 0
-
-        logger.info(f"删除笔记记录 (video_id={video_id}, platform={platform})")
-        return delete_task_by_video(video_id, platform)
+        return note_records.delete_note_record(
+            video_id=video_id,
+            platform=platform,
+            task_id=task_id,
+            log=logger,
+        )
 
     # ---------------- 私有方法 ----------------
 
@@ -611,8 +607,9 @@ class NoteGenerator:
         :param platform: 平台标识
         :param task_id: 任务 ID
         """
-        try:
-            insert_video_task(video_id=video_id, platform=platform, task_id=task_id)
-            logger.info(f"已保存任务记录到数据库 (video_id={video_id}, platform={platform}, task_id={task_id})")
-        except Exception as e:
-            logger.error(f"保存任务记录失败：{e}")
+        note_records.save_note_record(
+            video_id=video_id,
+            platform=platform,
+            task_id=task_id,
+            log=logger,
+        )
