@@ -18,6 +18,7 @@ from app.models.transcriber_model import TranscriptResult
 from app.services.constant import SUPPORT_PLATFORM_MAP
 from app.services.progress_state import cancel_task, is_task_cancel_requested, write_task_status
 from app.services import note_gpt_provider
+from app.services import note_completion
 from app.services import note_generation_plan
 from app.services import note_llm_markdown
 from app.services import note_markdown_postprocess
@@ -179,16 +180,14 @@ class NoteGenerator:
                 cache_paths.markdown_cache_file.write_text(markdown, encoding="utf-8")
 
                 self._cancel_if_requested(task_id)
-                self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
-                self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
-
-                self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
-                logger.info(f"文字稿生成成功 (task_id={task_id})")
-                return self._build_note_result(
+                return self._complete_generation(
+                    task_id=task_id,
                     markdown=markdown,
                     video_url=video_url,
                     transcript=transcript,
                     audio_meta=audio_meta,
+                    platform=platform,
+                    success_message="文字稿生成成功",
                 )
 
             if mode_branch.is_polished_transcript:
@@ -201,17 +200,14 @@ class NoteGenerator:
                 )
                 self._cancel_if_requested(task_id)
 
-                self._cancel_if_requested(task_id)
-                self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
-                self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
-
-                self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
-                logger.info(f"校对文字稿生成成功 (task_id={task_id})")
-                return self._build_note_result(
+                return self._complete_generation(
+                    task_id=task_id,
                     markdown=markdown,
                     video_url=video_url,
                     transcript=transcript,
                     audio_meta=audio_meta,
+                    platform=platform,
+                    success_message="校对文字稿生成成功",
                 )
 
             # 3. GPT 总结
@@ -242,17 +238,14 @@ class NoteGenerator:
 
             # 5. 保存记录到数据库
             self._cancel_if_requested(task_id)
-            self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
-            self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
-
-            # 6. 完成
-            self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
-            logger.info(f"笔记生成成功 (task_id={task_id})")
-            return self._build_note_result(
+            return self._complete_generation(
+                task_id=task_id,
                 markdown=markdown,
                 video_url=video_url,
                 transcript=transcript,
                 audio_meta=audio_meta,
+                platform=platform,
+                success_message="笔记生成成功",
             )
 
         except TaskCancelledError as exc:
@@ -340,6 +333,30 @@ class NoteGenerator:
             video_url=video_url,
             transcript=transcript,
             audio_meta=audio_meta,
+        )
+
+    def _complete_generation(
+        self,
+        *,
+        task_id: Optional[str],
+        markdown: str,
+        video_url: Union[str, HttpUrl],
+        transcript: TranscriptResult,
+        audio_meta: AudioDownloadResult,
+        platform: str,
+        success_message: str,
+    ) -> NoteResult:
+        return note_completion.complete_note_generation(
+            task_id=task_id,
+            markdown=markdown,
+            video_url=video_url,
+            transcript=transcript,
+            audio_meta=audio_meta,
+            platform=platform,
+            success_message=success_message,
+            update_status=self._update_status,
+            save_metadata=self._save_metadata,
+            log=logger,
         )
 
     @staticmethod
