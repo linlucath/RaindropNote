@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
@@ -49,17 +49,17 @@ class VideoRequest(BaseModel):
     video_url: str
     platform: Optional[str] = None
     quality: DownloadQuality
-    screenshot: Optional[bool] = False
-    link: Optional[bool] = False
+    screenshot: bool = False
+    link: bool = False
     model_name: Optional[str] = None
     provider_id: Optional[str] = None
     task_id: Optional[str] = None
-    format: Optional[list] = []
-    style: str = None
-    extras: Optional[str]=None
-    video_understanding: Optional[bool] = False
-    video_interval: Optional[int] = 0
-    grid_size: Optional[list] = []
+    format: list[str] = Field(default_factory=list)
+    style: Optional[str] = None
+    extras: Optional[str] = None
+    video_understanding: bool = False
+    video_interval: int = 0
+    grid_size: list[int] = Field(default_factory=list)
     mode: Optional[str] = SUPPORTED_GENERATION_MODE
 
     @field_validator("video_url")
@@ -140,9 +140,11 @@ def _action_response(result: note_route_actions.NoteRouteActionResult):
 
 
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
-                  link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
-                  _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[], mode: str = SUPPORTED_GENERATION_MODE
+                  link: bool = False, screenshot: bool = False, model_name: str | None = None,
+                  provider_id: str | None = None, _format: list[str] | None = None,
+                  style: str | None = None, extras: str | None = None, video_understanding: bool = False,
+                  video_interval: int = 0, grid_size: list[int] | None = None,
+                  mode: str = SUPPORTED_GENERATION_MODE
                   ):
     try:
         return note_tasks.run_note_task(
@@ -159,7 +161,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             extras=extras,
             video_understanding=video_understanding,
             video_interval=video_interval,
-            grid_size=grid_size,
+            grid_size=grid_size or [],
             mode=mode,
             output_dir=Path(NOTE_OUTPUT_DIR),
             note_generator_factory=NoteGenerator,
