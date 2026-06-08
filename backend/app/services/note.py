@@ -25,7 +25,8 @@ from app.services import note_task_lifecycle
 from app.services import note_transcript_source
 from app.services import subtitle_audio_meta
 from app.services import subtitle_transcripts
-from app.services.task_runtime import default_note_output_dir
+from app.services import video_download_result
+from app.services.task_runtime import default_note_output_dir, default_video_download_dir
 from app.services import transcript_markdown
 from app.utils.path_helper import get_screenshot_dir
 
@@ -88,6 +89,7 @@ class NoteGenerator:
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
         mode: str = "note",
+        video_resolution: str = "best",
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -122,6 +124,33 @@ class NoteGenerator:
 
             downloader = self._get_downloader(platform)
             self._cancel_if_requested(task_id)
+
+            if mode == "video_download":
+                self._update_status(task_id, TaskStatus.DOWNLOADING, platform=platform)
+                video_output_dir = default_video_download_dir()
+                video_path = Path(
+                    downloader.download_video(
+                        str(video_url),
+                        output_dir=str(video_output_dir),
+                        resolution=video_resolution,
+                    )
+                )
+                self.video_path = video_path
+                audio_meta = self._build_video_download_audio_meta(
+                    video_url=video_url,
+                    platform=platform,
+                    video_path=video_path,
+                )
+                result = video_download_result.build_video_download_result(
+                    audio_meta=audio_meta,
+                    video_path=video_path,
+                    resolution=video_resolution,
+                )
+                self._update_status(task_id, TaskStatus.SAVING, title=audio_meta.title, platform=platform)
+                self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
+                self._update_status(task_id, TaskStatus.SUCCESS, title=audio_meta.title, platform=platform)
+                logger.info(f"视频下载完成 (task_id={task_id})")
+                return result
 
             cache_paths = note_generation_plan.build_cache_paths(NOTE_OUTPUT_DIR, task_id)
             # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
@@ -331,6 +360,18 @@ class NoteGenerator:
             platform=platform,
             transcript=transcript,
             title_lookup=NoteGenerator._fetch_video_title,
+        )
+
+    @staticmethod
+    def _build_video_download_audio_meta(
+        video_url: Union[str, HttpUrl],
+        platform: str,
+        video_path: Path,
+    ) -> AudioDownloadResult:
+        return video_download_result.build_video_download_audio_meta(
+            video_url=video_url,
+            platform=platform,
+            video_path=video_path,
         )
 
     @staticmethod

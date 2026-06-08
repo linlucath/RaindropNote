@@ -227,7 +227,12 @@ class DouyinDownloader(Downloader):
         except Exception as e:
             raise e
 
-    def download_video(self, video_url: str, output_dir: Union[str, None] = None) -> str:
+    def download_video(
+        self,
+        video_url: str,
+        output_dir: Union[str, None] = None,
+        resolution: Optional[str] = None,
+    ) -> str:
 
         try:
 

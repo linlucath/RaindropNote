@@ -91,6 +91,7 @@ class KuaiShouDownloader(Downloader, ABC):
             self,
             video_url: str,
             output_dir: Union[str, None] = None,
+            resolution: Optional[str] = None,
     ) -> str:
         result = self.download(video_url, output_dir)
         logger.debug("KuaiShou video path: %s", result.video_path)

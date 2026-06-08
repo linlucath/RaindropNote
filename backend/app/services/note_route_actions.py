@@ -74,6 +74,7 @@ class GenerateNoteRoutePayload:
     video_interval: int
     grid_size: Optional[list]
     mode: Optional[str]
+    video_resolution: Optional[str] = None
 
     @classmethod
     def from_request(cls, request: Any):
@@ -93,6 +94,7 @@ class GenerateNoteRoutePayload:
             video_interval=request.video_interval,
             grid_size=request.grid_size,
             mode=request.mode,
+            video_resolution=getattr(request, "video_resolution", None),
         )
 
 
@@ -169,6 +171,7 @@ def generate_note_action(
     output_dir: Path,
     resolve_platform: Callable[[GenerateNoteRoutePayload], str],
     normalize_generation_mode: Callable[[Optional[str]], str],
+    normalize_video_resolution: Callable[[Optional[str]], str] | None = None,
     delete_task_artifacts: Callable[[str, Path], int],
     update_status: Callable[[str, TaskStatus], Any],
     add_background_task: Callable[..., Any],
@@ -177,6 +180,12 @@ def generate_note_action(
     log: Any = None,
 ) -> NoteRouteActionResult:
     platform = resolve_platform(payload)
+    normalized_mode = normalize_generation_mode(payload.mode)
+    normalize_resolution = normalize_video_resolution or (lambda resolution: resolution)
+    normalized_video_resolution = normalize_resolution(payload.video_resolution)
+
+    if normalized_mode != "video_download" and (not payload.model_name or not payload.provider_id):
+        return NoteRouteActionResult.error(msg="请选择模型和提供者", code=400)
 
     if payload.task_id:
         task_id = payload.task_id
@@ -207,7 +216,8 @@ def generate_note_action(
         payload.video_understanding,
         payload.video_interval,
         payload.grid_size,
-        normalize_generation_mode(payload.mode),
+        normalized_mode,
+        normalized_video_resolution,
     )
     return NoteRouteActionResult.success({"task_id": task_id})
 

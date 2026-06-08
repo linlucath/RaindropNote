@@ -189,6 +189,18 @@ class TestNoteTasks(unittest.TestCase):
         self.assertEqual(view.data["task_id"], "task-1")
         self.assertEqual(view.data["result"]["markdown"], "# cached")
 
+    def test_get_task_status_view_returns_error_for_missing_task_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            view = note_tasks.get_task_status_view(
+                "missing-task",
+                output_dir=Path(tmp),
+                read_status=lambda **_kwargs: {},
+            )
+
+        self.assertFalse(view.ok)
+        self.assertEqual(view.code, 404)
+        self.assertEqual(view.message, "任务不存在或已被清理")
+
     def test_get_task_status_view_uses_runtime_read_task_status_patch_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
