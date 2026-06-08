@@ -5,6 +5,21 @@ from app.enmus.task_status_enums import TaskStatus
 
 
 SUPPORTED_GENERATION_MODE = "polished_transcript"
+VIDEO_DOWNLOAD_MODE = "video_download"
+SUPPORTED_GENERATION_MODES = {
+    SUPPORTED_GENERATION_MODE,
+    VIDEO_DOWNLOAD_MODE,
+}
+
+DEFAULT_VIDEO_RESOLUTION = "best"
+SUPPORTED_VIDEO_RESOLUTIONS = {
+    DEFAULT_VIDEO_RESOLUTION,
+    "2160",
+    "1080",
+    "720",
+    "480",
+    "360",
+}
 
 ACTIVE_TASK_STATUSES = {
     TaskStatus.PENDING.value,
@@ -37,6 +52,10 @@ COMPLETED_ITEM_STATUSES = {
 
 def default_note_output_dir() -> Path:
     return Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+
+
+def default_video_download_dir() -> Path:
+    return Path.home() / "Downloads"
 
 
 def default_batch_output_dir(note_output_dir: Path | str | None = None) -> Path:

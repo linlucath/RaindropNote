@@ -88,6 +88,7 @@ class YoutubeDownloader(Downloader, ABC):
         self,
         video_url: str,
         output_dir: Union[str, None] = None,
+        resolution: Optional[str] = None,
     ) -> str:
         """
         下载视频，返回视频文件路径

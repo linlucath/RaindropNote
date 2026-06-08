@@ -119,6 +119,53 @@ class TestBilibiliDownloader(unittest.TestCase):
         self.assertEqual(result, str(video_path))
         self.assertEqual(stdout.getvalue(), '')
 
+    def test_download_video_passes_resolution_to_video_options_builder(self):
+        captured_resolution = []
+
+        class FakeYoutubeDL:
+            def __init__(self, opts):
+                self.opts = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def extract_info(self, video_url, download=True):
+                Path(
+                    self.opts['outtmpl']
+                    .replace('%(id)s', 'BV1bDCrBrEUP')
+                    .replace('%(ext)s', 'mp4')
+                ).write_bytes(b'video')
+                return {'id': 'BV1bDCrBrEUP'}
+
+        def build_video_opts(output_path, *, resolution=None):
+            captured_resolution.append(resolution)
+            return {'outtmpl': output_path, 'noplaylist': True}
+
+        downloader = BilibiliDownloader()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                'app.downloaders.bilibili_downloader.build_video_ydl_opts',
+                side_effect=build_video_opts,
+            ), patch(
+                'app.downloaders.bilibili_downloader._apply_bilibili_ydl_defaults',
+                side_effect=lambda opts: opts,
+            ), patch(
+                'app.downloaders.bilibili_downloader.yt_dlp.YoutubeDL',
+                side_effect=FakeYoutubeDL,
+            ):
+                result = downloader.download_video(
+                    'https://www.bilibili.com/video/BV1bDCrBrEUP',
+                    output_dir=tmp,
+                    resolution='1080',
+                )
+
+        self.assertEqual(captured_resolution, ['1080'])
+        self.assertTrue(result.endswith('BV1bDCrBrEUP-1080p.mp4'))
+
     def test_parse_json3_subtitle_keeps_legacy_file_wrapper_behavior(self):
         downloader = BilibiliDownloader()
 

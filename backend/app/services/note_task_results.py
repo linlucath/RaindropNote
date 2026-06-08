@@ -3,7 +3,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from app.services.task_runtime import SUPPORTED_GENERATION_MODE, default_note_output_dir
+from app.services.task_runtime import (
+    SUPPORTED_GENERATION_MODE,
+    VIDEO_DOWNLOAD_MODE,
+    default_note_output_dir,
+)
 
 
 def resolve_note_output_dir(output_dir: Path | str | None = None) -> Path:
@@ -46,7 +50,7 @@ def is_note_result_file(path: Path) -> bool:
 
 
 def is_polished_transcript_result(result_content: Mapping[str, Any]) -> bool:
-    if result_content.get("mode") == SUPPORTED_GENERATION_MODE:
+    if result_content.get("mode") in {SUPPORTED_GENERATION_MODE, VIDEO_DOWNLOAD_MODE}:
         return True
 
     markdown = result_content.get("markdown")

@@ -49,12 +49,27 @@ def test_build_video_ydl_opts_matches_current_video_download_defaults():
     opts = build_video_ydl_opts(output_path)
 
     assert opts == {
-        'format': 'bv*[ext=mp4]/bestvideo+bestaudio/best',
+        'format': 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b',
         'outtmpl': output_path,
         'noplaylist': True,
         'quiet': False,
         'merge_output_format': 'mp4',
     }
+
+
+def test_build_video_ydl_opts_caps_requested_resolution():
+    output_path = os.path.join('/tmp/bili', '%(id)s.%(ext)s')
+
+    opts = build_video_ydl_opts(output_path, resolution='1080')
+
+    assert opts['format'] == 'bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080][ext=mp4]/b[height<=1080]'
+    assert opts['merge_output_format'] == 'mp4'
+
+
+def test_build_video_ydl_opts_falls_back_to_best_for_empty_resolution():
+    output_path = os.path.join('/tmp/bili', '%(id)s.%(ext)s')
+
+    assert build_video_ydl_opts(output_path, resolution='')['format'] == build_video_ydl_opts(output_path)['format']
 
 
 def test_build_subtitle_ydl_opts_matches_current_subtitle_download_defaults():

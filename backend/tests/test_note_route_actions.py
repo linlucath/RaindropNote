@@ -27,6 +27,7 @@ def test_generate_note_action_uses_runtime_injected_dependencies():
         video_interval=5,
         grid_size=[2, 2],
         mode="polished_transcript",
+        video_resolution="1080",
     )
     output_dir = Path("/tmp/note-route-actions")
     deleted = []
@@ -81,6 +82,7 @@ def test_generate_note_action_uses_runtime_injected_dependencies():
             payload.video_interval,
             payload.grid_size,
             "normalized:polished_transcript",
+            "1080",
         )
     ]
 
@@ -110,3 +112,74 @@ def test_generate_note_endpoint_uses_router_uuid_patch_point():
     assert response.status_code == 200
     assert response.json()["data"]["task_id"] == "task-from-router-uuid"
     assert run_task.call_args.args[0] == "task-from-router-uuid"
+
+
+def test_generate_note_endpoint_rejects_invalid_video_resolution_before_scheduling():
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+    app.include_router(note_router.router, prefix="/api")
+
+    with patch("app.routers.note.NoteGenerator._update_status") as update_status, patch(
+        "app.routers.note.run_note_task"
+    ) as run_task:
+        client = TestClient(app)
+        response = client.post(
+            "/api/generate_note",
+            json={
+                "video_url": "https://www.bilibili.com/video/BV123",
+                "quality": "fast",
+                "mode": "video_download",
+                "video_resolution": "999",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "不支持的视频分辨率"
+    update_status.assert_not_called()
+    run_task.assert_not_called()
+
+
+def test_generate_note_action_rejects_transcript_tasks_without_model_and_provider():
+    payload = GenerateNoteRoutePayload(
+        video_url="https://www.bilibili.com/video/BV123",
+        platform=None,
+        quality="fast",
+        task_id=None,
+        link=False,
+        screenshot=False,
+        model_name=None,
+        provider_id=None,
+        format=["markdown"],
+        style=None,
+        extras=None,
+        video_understanding=False,
+        video_interval=0,
+        grid_size=[],
+        mode="polished_transcript",
+        video_resolution="best",
+    )
+    status_updates = []
+    background_tasks = []
+
+    result = generate_note_action(
+        payload,
+        output_dir=Path("/tmp/note-route-actions"),
+        resolve_platform=lambda action_payload: "bilibili",
+        normalize_generation_mode=lambda mode: mode,
+        normalize_video_resolution=lambda resolution: resolution or "best",
+        delete_task_artifacts=lambda task_id, output_dir: 0,
+        update_status=lambda task_id, status: status_updates.append((task_id, status)),
+        add_background_task=lambda *args: background_tasks.append(args),
+        run_note_task=lambda *args: None,
+        new_task_id=lambda: "task-without-model",
+        log=None,
+    )
+
+    assert result.ok is False
+    assert result.code == 400
+    assert result.msg == "请选择模型和提供者"
+    assert status_updates == []
+    assert background_tasks == []

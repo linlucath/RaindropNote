@@ -62,6 +62,7 @@ class VideoRequest(BaseModel):
     video_interval: int = 0
     grid_size: list[int] = Field(default_factory=list)
     mode: Optional[str] = SUPPORTED_GENERATION_MODE
+    video_resolution: Optional[str] = None
 
     @field_validator("video_url")
     def validate_supported_url(cls, v):
@@ -78,6 +79,10 @@ def _is_note_result_file(path: Path) -> bool:
 
 def _normalize_generation_mode(mode: Optional[str]) -> str:
     return note_router_helpers.normalize_generation_mode(mode)
+
+
+def _normalize_video_resolution(resolution: Optional[str]) -> str:
+    return note_router_helpers.normalize_video_resolution(resolution)
 
 
 def _reject_unsupported_platform() -> None:
@@ -145,7 +150,8 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
                   provider_id: str | None = None, _format: list[str] | None = None,
                   style: str | None = None, extras: str | None = None, video_understanding: bool = False,
                   video_interval: int = 0, grid_size: list[int] | None = None,
-                  mode: str = SUPPORTED_GENERATION_MODE
+                  mode: str = SUPPORTED_GENERATION_MODE,
+                  video_resolution: str | None = None,
                   ):
     try:
         return note_tasks.run_note_task(
@@ -164,6 +170,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_interval=video_interval,
             grid_size=grid_size or [],
             mode=mode,
+            video_resolution=video_resolution,
             output_dir=Path(NOTE_OUTPUT_DIR),
             note_generator_factory=NoteGenerator,
             executor_factory=get_task_executor,
@@ -208,6 +215,7 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             output_dir=Path(NOTE_OUTPUT_DIR),
             resolve_platform=_resolve_request_platform,
             normalize_generation_mode=_normalize_generation_mode,
+            normalize_video_resolution=_normalize_video_resolution,
             delete_task_artifacts=_delete_task_artifacts,
             update_status=NoteGenerator._update_status,
             add_background_task=background_tasks.add_task,

@@ -8,7 +8,14 @@ from app.enmus.task_status_enums import TaskStatus
 from app.services.note import NoteGenerator, logger
 from app.services import note_task_results
 from app.services.progress_state import read_task_status
-from app.services.task_runtime import SUPPORTED_GENERATION_MODE, default_note_output_dir
+from app.services.task_runtime import (
+    DEFAULT_VIDEO_RESOLUTION,
+    SUPPORTED_GENERATION_MODE,
+    SUPPORTED_GENERATION_MODES,
+    SUPPORTED_VIDEO_RESOLUTIONS,
+    VIDEO_DOWNLOAD_MODE,
+    default_note_output_dir,
+)
 from app.services.task_serial_executor import get_task_executor
 
 NOTE_OUTPUT_DIR = default_note_output_dir()
@@ -35,8 +42,15 @@ def default_output_dir() -> Path:
 
 def normalize_generation_mode(mode: Optional[str]) -> str:
     normalized = (mode or SUPPORTED_GENERATION_MODE).strip() or SUPPORTED_GENERATION_MODE
-    if normalized != SUPPORTED_GENERATION_MODE:
-        raise NoteTaskValidationError("当前仅支持校对文字稿模式")
+    if normalized not in SUPPORTED_GENERATION_MODES:
+        raise NoteTaskValidationError("不支持的任务模式")
+    return normalized
+
+
+def normalize_video_resolution(resolution: Optional[str]) -> str:
+    normalized = (resolution or DEFAULT_VIDEO_RESOLUTION).strip() or DEFAULT_VIDEO_RESOLUTION
+    if normalized not in SUPPORTED_VIDEO_RESOLUTIONS:
+        raise NoteTaskValidationError("不支持的视频分辨率")
     return normalized
 
 
@@ -262,11 +276,7 @@ def get_task_status_view(
             "task_id": task_id,
         })
 
-    return TaskStatusView(ok=True, data={
-        "status": TaskStatus.PENDING.value,
-        "message": "任务排队中",
-        "task_id": task_id,
-    })
+    return TaskStatusView(ok=False, message="任务不存在或已被清理", code=404)
 
 
 def run_note_task(
@@ -285,6 +295,7 @@ def run_note_task(
     video_interval: int = 0,
     grid_size: list | None = None,
     mode: str = SUPPORTED_GENERATION_MODE,
+    video_resolution: str | None = None,
     *,
     output_dir: Path | None = None,
     note_generator_factory: Callable[[], Any] | None = None,
@@ -293,10 +304,11 @@ def run_note_task(
     log: Any = logger,
 ) -> None:
     mode = normalize_generation_mode(mode)
+    video_resolution = normalize_video_resolution(video_resolution)
     note_generator_factory = note_generator_factory or NoteGenerator
     executor_factory = executor_factory or get_task_executor
 
-    if not model_name or not provider_id:
+    if mode != VIDEO_DOWNLOAD_MODE and (not model_name or not provider_id):
         raise NoteTaskValidationError("请选择模型和提供者")
 
     def _execute_note_task():
@@ -316,6 +328,7 @@ def run_note_task(
             video_interval=video_interval,
             grid_size=grid_size if grid_size is not None else [],
             mode=mode,
+            video_resolution=video_resolution,
         )
 
     note_output_dir = output_dir or default_output_dir()

@@ -95,6 +95,7 @@ class BilibiliDownloader(Downloader, ABC):
         self,
         video_url: str,
         output_dir: Union[str, None] = None,
+        resolution: Optional[str] = None,
     ) -> str:
         """
         下载视频，返回视频文件路径
@@ -105,22 +106,19 @@ class BilibiliDownloader(Downloader, ABC):
         os.makedirs(output_dir, exist_ok=True)
         logger.debug("解析 Bilibili 视频地址: %s", video_url)
         video_id = extract_video_id(video_url, "bilibili")
-        video_path = os.path.join(output_dir, f"{video_id}.mp4")
+        normalized_resolution = (resolution or "best").strip() or "best"
+        output_stem = video_id if normalized_resolution == "best" else f"{video_id}-{normalized_resolution}p"
+        video_path = os.path.join(output_dir, f"{output_stem}.mp4")
         if os.path.exists(video_path):
             return video_path
 
-        # 检查是否已经存在
+        output_path = os.path.join(output_dir, f"{output_stem}.%(ext)s")
 
-
-        output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
-
-        ydl_opts = build_video_ydl_opts(output_path)
+        ydl_opts = build_video_ydl_opts(output_path, resolution=normalized_resolution)
         ydl_opts = _apply_bilibili_ydl_defaults(ydl_opts)
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=True)
-            video_id = info.get("id")
-            video_path = os.path.join(output_dir, f"{video_id}.mp4")
+            ydl.extract_info(video_url, download=True)
 
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"视频文件未找到: {video_path}")

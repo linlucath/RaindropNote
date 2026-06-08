@@ -25,9 +25,23 @@ def build_audio_ydl_opts(output_path: str, *, skip_download: bool) -> dict:
     return ydl_opts
 
 
-def build_video_ydl_opts(output_path: str) -> dict:
+def _build_video_format(resolution: str | None = None) -> str:
+    normalized = (resolution or 'best').strip() or 'best'
+    if normalized == 'best':
+        return 'bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b'
+
+    height_filter = f'[height<={normalized}]'
+    return (
+        f'bv*{height_filter}[ext=mp4]+ba[ext=m4a]/'
+        f'bv*{height_filter}+ba/'
+        f'b{height_filter}[ext=mp4]/'
+        f'b{height_filter}'
+    )
+
+
+def build_video_ydl_opts(output_path: str, *, resolution: str | None = None) -> dict:
     return {
-        'format': 'bv*[ext=mp4]/bestvideo+bestaudio/best',
+        'format': _build_video_format(resolution),
         'outtmpl': output_path,
         'noplaylist': True,
         'quiet': False,

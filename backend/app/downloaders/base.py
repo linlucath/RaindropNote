@@ -36,7 +36,8 @@ class Downloader(ABC):
 
     @staticmethod
     def download_video(self, video_url: str,
-                       output_dir: Union[str, None] = None) -> str:
+                       output_dir: Union[str, None] = None,
+                       resolution: Optional[str] = None) -> str:
         pass
 
     def download_subtitles(self, video_url: str, output_dir: str = None,

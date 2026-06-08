@@ -18,6 +18,13 @@ def normalize_generation_mode(mode: Optional[str]) -> str:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+def normalize_video_resolution(resolution: Optional[str]) -> str:
+    try:
+        return note_tasks.normalize_video_resolution(resolution)
+    except note_tasks.NoteTaskValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 def validate_supported_url(value):
     url = str(value)
     parsed = urlparse(url)
