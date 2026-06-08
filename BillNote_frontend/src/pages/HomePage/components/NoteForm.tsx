@@ -4,6 +4,7 @@ import {
   FormControl,
   FormField,
   FormItem,
+  FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
 import {
@@ -62,6 +63,7 @@ import {
   shouldAutoLoadSelectedUploaderVideos,
 } from '@/pages/HomePage/components/progressiveBatchLoading.ts'
 import {
+  hasValidGenerationPayloadSettings,
   inferPlatformFromVideoUrl,
   resolveSubmissionPlatform,
   shouldReuseTaskForSubmission,
@@ -119,6 +121,8 @@ const formSchema = z
     source_type: z.enum(['single', 'uploader_batch', 'dynamics']).default('single'),
     uploader_source_mode: z.enum(['manual', 'followings']).default('manual'),
     batch_limit: z.coerce.number().min(0).max(500).default(0).optional(),
+    task_mode: z.enum(['polished_transcript', 'video_download']).default('polished_transcript'),
+    video_resolution: z.enum(['best', '2160', '1080', '720', '480', '360']).default('best'),
     platform: z.string().nonempty('请选择平台'),
   })
   .superRefine(
@@ -262,6 +266,7 @@ const NoteForm = () => {
   const form = useForm<NoteFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      ...createDefaultHomePageFormState(),
       ...persistedFormState,
       platform: normalizeSupportedPlatform(persistedFormState.platform),
     },
@@ -302,6 +307,8 @@ const NoteForm = () => {
   const watchedVideoUrl = useWatch({ control: form.control, name: 'video_url' }) as
     | string
     | undefined
+  const taskMode = useWatch({ control: form.control, name: 'task_mode' }) as GenerationMode
+  const videoResolution = useWatch({ control: form.control, name: 'video_resolution' }) as string
   const uploaderBatchMode = sourceType === 'uploader_batch'
   const dynamicsMode = sourceType === 'dynamics'
   const batchMode = uploaderBatchMode || dynamicsMode
@@ -316,8 +323,10 @@ const NoteForm = () => {
         uploader_source_mode: uploaderSourceMode,
         video_url: watchedVideoUrl,
         platform,
+        mode: batchMode ? 'polished_transcript' : taskMode,
+        video_resolution: videoResolution,
       }),
-    [platform, sourceType, uploaderSourceMode, watchedVideoUrl]
+    [batchMode, platform, sourceType, taskMode, uploaderSourceMode, videoResolution, watchedVideoUrl]
   )
   const batchRequestSignature = useMemo(
     () =>
@@ -378,6 +387,8 @@ const NoteForm = () => {
       uploader_source_mode: uploaderSourceMode,
       video_url: watchedVideoUrl,
       platform: resolvedSourcePlatform,
+      mode: batchMode ? 'polished_transcript' : taskMode,
+      video_resolution: videoResolution,
     },
     ignoreTaskStatus: true,
   })
@@ -457,12 +468,17 @@ const NoteForm = () => {
       uploader_source_mode: uploaderSourceMode || 'manual',
       video_url: watchedVideoUrl || '',
       batch_limit: BATCH_LIMIT_ALL,
+      task_mode: batchMode ? 'polished_transcript' : taskMode || 'polished_transcript',
+      video_resolution: videoResolution || 'best',
     })
   }, [
+    batchMode,
     resolvedSourcePlatform,
     setPersistedFormState,
     sourceType,
+    taskMode,
     uploaderSourceMode,
+    videoResolution,
     watchedVideoUrl,
   ])
   useEffect(() => {
@@ -547,6 +563,8 @@ const NoteForm = () => {
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
       batch_limit: BATCH_LIMIT_ALL,
+      task_mode: formData.task_mode || formData.mode || 'polished_transcript',
+      video_resolution: formData.video_resolution || 'best',
     })
     replacePersistedFormState({
       platform: normalizeSupportedPlatform(formData.platform),
@@ -554,6 +572,8 @@ const NoteForm = () => {
       uploader_source_mode: formData.uploader_source_mode || 'manual',
       video_url: formData.video_url || '',
       batch_limit: BATCH_LIMIT_ALL,
+      task_mode: formData.task_mode || formData.mode || 'polished_transcript',
+      video_resolution: formData.video_resolution || 'best',
     })
     resetPreviewUiState()
     clearPersistedPreviewState()
@@ -565,6 +585,27 @@ const NoteForm = () => {
     getCurrentTask,
     replacePersistedFormState,
   ])
+  useEffect(() => {
+    if (!batchMode) {
+      return
+    }
+
+    if (taskMode !== 'polished_transcript') {
+      form.setValue('task_mode', 'polished_transcript', {
+        shouldDirty: false,
+        shouldTouch: false,
+        shouldValidate: false,
+      })
+    }
+
+    if (videoResolution !== 'best') {
+      form.setValue('video_resolution', 'best', {
+        shouldDirty: false,
+        shouldTouch: false,
+        shouldValidate: false,
+      })
+    }
+  }, [batchMode, form, taskMode, videoResolution])
 
   const loadPreviewBatchPage = useEffectEvent(async (reset: boolean) => {
     const values = form.getValues()
@@ -823,7 +864,9 @@ const NoteForm = () => {
       batch_limit: BATCH_LIMIT_ALL,
       video_url: video.video_url,
       platform: video.platform || fallbackPlatform,
+      task_mode: 'polished_transcript' as GenerationMode,
       mode: 'polished_transcript' as GenerationMode,
+      video_resolution: 'best',
     }
 
     setSubmittingPreviewVideoIds(current =>
@@ -872,17 +915,19 @@ const NoteForm = () => {
   }
 
   const onSubmit = async (values: NoteFormValues) => {
+    const resolvedMode: GenerationMode = values.task_mode || 'polished_transcript'
     const generationSettings = getGenerationPayloadSettings()
-    if (!generationSettings) {
-      toast.error('请先在全局配置中选择模型')
+    if (resolvedMode !== 'video_download' && !hasValidGenerationPayloadSettings(generationSettings)) {
+      toast.error('请先在全局配置中选择可用模型')
       return
     }
 
-    const resolvedMode: GenerationMode = 'polished_transcript'
     const resolvedPlatform = resolveSubmissionPlatform(values)
     const resolvedValues = {
       ...values,
       platform: resolvedPlatform,
+      mode: resolvedMode,
+      video_resolution: values.video_resolution || 'best',
     }
     const reuseCurrentTask = shouldReuseTaskForSubmission({
       currentTaskId,
@@ -896,7 +941,7 @@ const NoteForm = () => {
 
     const payload = {
       ...resolvedValues,
-      ...generationSettings,
+      ...(generationSettings || { quality: resolvedQuality }),
       batch_limit: BATCH_LIMIT_ALL,
       mode: resolvedMode,
       task_id: reuseCurrentTask ? currentTaskId || '' : undefined,
@@ -922,7 +967,18 @@ const NoteForm = () => {
   }
   const FormButton = () => {
     const sameTaskGenerating = generating && matchesCurrentTaskSubmission
-    const label = sameTaskGenerating ? '当前文字稿生成中' : editing ? '重新生成' : '生成文字稿'
+    const label =
+      taskMode === 'video_download'
+        ? sameTaskGenerating
+          ? '当前视频下载中'
+          : editing
+            ? '重新下载'
+            : '下载视频'
+        : sameTaskGenerating
+          ? '当前文字稿生成中'
+          : editing
+            ? '重新生成'
+            : '生成文字稿'
 
     if (batchMode) {
       return null
@@ -995,6 +1051,8 @@ const NoteForm = () => {
                         if (value === 'uploader_batch' || value === 'dynamics') {
                           form.setValue('platform', 'bilibili')
                           form.setValue('uploader_source_mode', 'manual')
+                          form.setValue('task_mode', 'polished_transcript')
+                          form.setValue('video_resolution', 'best')
                         }
                         resetPreviewUiState()
                       }}
@@ -1020,6 +1078,91 @@ const NoteForm = () => {
                   </FormItem>
                 )}
               />
+              {!batchMode && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <FormField
+                    control={form.control}
+                    name="task_mode"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium text-neutral-600">
+                          任务模式
+                        </FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={value => {
+                            field.onChange(value)
+                            if (editing) {
+                              setCurrentTask(null)
+                            }
+                          }}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {[
+                              { value: 'polished_transcript', label: '生成文字稿' },
+                              { value: 'video_download', label: '下载视频' },
+                            ].map(option => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {taskMode === 'video_download' && (
+                    <FormField
+                      control={form.control}
+                      name="video_resolution"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs font-medium text-neutral-600">
+                            下载分辨率
+                          </FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={value => {
+                              field.onChange(value)
+                              if (editing) {
+                                setCurrentTask(null)
+                              }
+                            }}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {[
+                                { value: 'best', label: '最佳' },
+                                { value: '2160', label: '4K' },
+                                { value: '1080', label: '1080P' },
+                                { value: '720', label: '720P' },
+                                { value: '480', label: '480P' },
+                                { value: '360', label: '360P' },
+                              ].map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           </WorkspaceSection>
 

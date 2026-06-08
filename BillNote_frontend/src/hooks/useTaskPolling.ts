@@ -35,12 +35,13 @@ export const useTaskPolling = (interval = 3000) => {
               toast.success('文字稿生成成功')
               updateTaskContent(task.id, {
                 status,
+                message: '',
                 markdown,
                 transcript,
                 audioMeta: audio_meta,
               })
             } else if (status === 'FAILED') {
-              updateTaskContent(task.id, { status })
+              updateTaskContent(task.id, { status, message: res.message || '任务失败' })
               console.warn(`⚠️ 任务 ${task.id} 失败`)
             } else if (status === 'CANCELLED') {
               updateTaskContent(task.id, { status })
@@ -64,7 +65,10 @@ export const useTaskPolling = (interval = 3000) => {
           })
 
           if (initialResolution.shouldMarkFailed) {
-            updateTaskContent(task.id, { status: 'FAILED' })
+            updateTaskContent(task.id, {
+              status: 'FAILED',
+              message: initialResolution.failedMessage,
+            })
           }
           // Keep polling on transient request errors. A task should only become FAILED
           // when the backend explicitly reports FAILED, not when one poll request flakes.

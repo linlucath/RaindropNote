@@ -3,6 +3,8 @@ type SubmissionSourceSnapshot = {
   uploader_source_mode?: 'manual' | 'followings'
   video_url?: string
   platform?: string
+  mode?: 'polished_transcript' | 'video_download'
+  video_resolution?: string
 }
 
 type CurrentTaskLike = {
@@ -10,8 +12,16 @@ type CurrentTaskLike = {
   formData?: SubmissionSourceSnapshot | null
 } | null
 
+type GenerationPayloadSettings = {
+  model_name?: string | null
+  provider_id?: string | null
+} | null
+
 const normalizeValue = (value?: string) => (value || '').trim()
 const TERMINAL_TASK_STATUSES = new Set(['SUCCESS', 'FAILED', 'CANCELLED'])
+
+export const hasValidGenerationPayloadSettings = (settings: GenerationPayloadSettings) =>
+  Boolean(normalizeValue(settings?.model_name || undefined) && normalizeValue(settings?.provider_id || undefined))
 
 export const inferPlatformFromVideoUrl = (videoUrl?: string) => {
   const value = normalizeValue(videoUrl)
@@ -95,6 +105,10 @@ export const shouldReuseTaskForSubmission = ({
     (currentValues.uploader_source_mode || 'manual') ===
       (nextValues.uploader_source_mode || 'manual') &&
     normalizeValue(currentValues.platform) === normalizeValue(nextValues.platform) &&
-    normalizeValue(currentValues.video_url) === normalizeValue(nextValues.video_url)
+    normalizeValue(currentValues.video_url) === normalizeValue(nextValues.video_url) &&
+    (currentValues.mode || 'polished_transcript') ===
+      (nextValues.mode || 'polished_transcript') &&
+    normalizeValue(currentValues.video_resolution || 'best') ===
+      normalizeValue(nextValues.video_resolution || 'best')
   )
 }

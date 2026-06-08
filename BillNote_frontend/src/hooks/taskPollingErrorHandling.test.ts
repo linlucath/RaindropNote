@@ -14,6 +14,7 @@ test('marks the task as failed when the backend reports subtitle-only restrictio
     }),
     {
       shouldMarkFailed: true,
+      failedMessage: AUDIO_TRANSCRIPTION_REMOVED_MESSAGE,
     }
   )
 })
@@ -26,6 +27,7 @@ test('marks the task as failed for other backend business failures', () => {
     }),
     {
       shouldMarkFailed: true,
+      failedMessage: '任务失败',
     }
   )
 })

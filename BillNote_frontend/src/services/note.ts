@@ -1,7 +1,7 @@
 import request from '@/utils/request'
 import toast from 'react-hot-toast'
 
-export type GenerationMode = 'polished_transcript'
+export type GenerationMode = 'polished_transcript' | 'video_download'
 export type RuntimeTaskStatus =
   | 'PENDING'
   | 'PARSING'
@@ -88,6 +88,7 @@ export const generateNote = async (data: {
   video_interval?: number
   grid_size: Array<number>
   mode?: GenerationMode
+  video_resolution?: string
 }) => {
   try {
     console.log('generateNote', data)
@@ -99,7 +100,7 @@ export const generateNote = async (data: {
       }
       return null
     }
-    toast.success('文字稿生成任务已提交！')
+    toast.success(data.mode === 'video_download' ? '视频下载任务已提交！' : '文字稿生成任务已提交！')
 
     console.log('res', response)
     // 成功提示
@@ -148,9 +149,6 @@ export const get_task_status = async (task_id: string) => {
     return await request.get('/task_status/' + task_id)
   } catch (e) {
     console.error('❌ 请求出错', e)
-
-    // 错误提示
-    toast.error('文字稿生成失败，请稍后重试')
 
     throw e // 抛出错误以便调用方处理
   }
