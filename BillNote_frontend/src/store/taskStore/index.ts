@@ -15,6 +15,7 @@ export interface AudioMeta {
   raw_info: any
   title: string
   video_id: string
+  video_path?: string
 }
 
 export interface Segment {
@@ -34,6 +35,7 @@ export interface Task {
   markdown: string
   transcript: Transcript
   status: TaskStatus
+  message?: string
   platform: string
   audioMeta: AudioMeta
   createdAt: string
@@ -51,6 +53,8 @@ export interface Task {
     extras?: string
     format?: string[]
     mode?: GenerationMode
+    task_mode?: GenerationMode
+    video_resolution?: string
     polish_transcript?: boolean
     batch_limit?: number
     skip_existing?: boolean
@@ -90,6 +94,7 @@ export const useTaskStore = create<TaskStore>()(
               formData: formData,
               id: taskId,
               status: 'PENDING',
+              message: '',
               markdown: '',
               platform: platform,
               transcript: {
@@ -145,9 +150,17 @@ export const useTaskStore = create<TaskStore>()(
         if (!task) return
 
         const newFormData = payload || task.formData
-        await generateNote({
+        const retryMode = newFormData.mode || newFormData.task_mode || 'polished_transcript'
+        const retryFormData = {
           ...newFormData,
-          mode: 'polished_transcript',
+          mode: retryMode,
+          task_mode: newFormData.task_mode || retryMode,
+          video_resolution: newFormData.video_resolution || 'best',
+        }
+        await generateNote({
+          ...retryFormData,
+          mode: retryMode,
+          video_resolution: newFormData.video_resolution || 'best',
           task_id: id,
         })
 
@@ -156,8 +169,9 @@ export const useTaskStore = create<TaskStore>()(
             t.id === id
               ? {
                   ...t,
-                  formData: newFormData, // ✅ 显式更新 formData
+                  formData: retryFormData, // ✅ 显式更新 formData
                   status: 'PENDING',
+                  message: '',
                 }
               : t
           ),

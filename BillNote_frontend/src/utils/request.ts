@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 export interface IResponse<T = any> {
   code: number;
   msg: string;
+  detail?: string;
   data: T;
 }
 
@@ -30,7 +31,7 @@ request.interceptors.response.use(
     } else {
       // 业务错误，统一显示后端返回的错误消息
       // Business error, uniformly display the error message returned from the backend
-      toast.error(res.msg || '操作失败，请稍后再试');
+      toast.error(res.msg || res.detail || '操作失败，请稍后再试');
       return Promise.reject(res); // 拒绝Promise，让业务代码可以捕获并处理
     }
   },
@@ -41,7 +42,7 @@ request.interceptors.response.use(
       // 如果后端有返回错误信息，则显示后端信息
       // If the backend returns an error message, display it
 
-      toast.error(res.msg || '服务器错误，请稍后再试');
+      toast.error(res.msg || res.detail || '服务器错误，请稍后再试');
       return Promise.reject(res);
     } else {
       // 没有响应数据（如网络中断），显示通用网络错误

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { IProvider, IResponse } from '@/types'
+import { IProvider } from '@/types'
 import {
   addProvider,
   getProviderById,
@@ -38,19 +38,16 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
   // 设置整个 provider 列表
   setAllProviders: providers => set({ provider: providers }),
   loadProviderById: async (id: string) => {
-    const res:IResponse<IProvider> = await getProviderById(id)
-
-      const item = res
-      return {
-        id: item.id,
-        name: item.name,
-        logo: item.logo,
-        apiKey: item.api_key,
-        baseUrl: item.base_url,
-        type: item.type,
-        enabled: item.enabled,
-      }
-
+    const item = await getProviderById(id)
+    return {
+      id: item.id,
+      name: item.name,
+      logo: item.logo,
+      apiKey: item.api_key,
+      baseUrl: item.base_url,
+      type: item.type,
+      enabled: item.enabled,
+    }
   },
   addNewProvider: async (provider: IProvider) => {
     const payload = {
@@ -59,16 +56,13 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
       base_url: provider.baseUrl,
     }
     try {
-      const res = await addProvider(payload)
-      if (res.data.code === 0) {
-        const item = res.data.data
-        console.log('Provider ', item)
-
-        await get().fetchProviderList()
-        return  item
-      }
+      const item = await addProvider(payload)
+      console.log('Provider ', item)
+      await get().fetchProviderList()
+      return item
     } catch (error) {
       console.error('Error fetching provider:', error)
+      throw error
     }
   },
   // 按 id 获取单个 provider
@@ -80,14 +74,12 @@ export const useProviderStore = create<ProviderStore>((set, get) => ({
         api_key: provider.apiKey,
         base_url: provider.baseUrl,
       }
-      const res = await updateProviderById(data)
-      if (res.data.code === 0) {
-        const item = res.data.data
-        console.log('Provider ', item)
-        await get().fetchProviderList()
-      }
+      const item = await updateProviderById(data)
+      console.log('Provider ', item)
+      await get().fetchProviderList()
     } catch (error) {
       console.error('Error fetching provider:', error)
+      throw error
     }
   },
   getProviderList: () => get().provider,

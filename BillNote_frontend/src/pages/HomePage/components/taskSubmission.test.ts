@@ -72,6 +72,54 @@ test('creates a new task when the submission switches source mode', () => {
   )
 })
 
+test('creates a new task when the submission switches generation mode', () => {
+  assert.equal(
+    shouldReuseTaskForSubmission({
+      currentTaskId: 'task-1',
+      currentTask: {
+        formData: {
+          source_type: 'single',
+          video_url: 'https://www.bilibili.com/video/BV1same',
+          platform: 'bilibili',
+          mode: 'polished_transcript',
+        },
+      },
+      nextValues: {
+        source_type: 'single',
+        video_url: 'https://www.bilibili.com/video/BV1same',
+        platform: 'bilibili',
+        mode: 'video_download',
+      },
+    }),
+    false
+  )
+})
+
+test('creates a new task when the requested video resolution changes', () => {
+  assert.equal(
+    shouldReuseTaskForSubmission({
+      currentTaskId: 'task-1',
+      currentTask: {
+        formData: {
+          source_type: 'single',
+          video_url: 'https://www.bilibili.com/video/BV1same',
+          platform: 'bilibili',
+          mode: 'video_download',
+          video_resolution: '1080',
+        },
+      },
+      nextValues: {
+        source_type: 'single',
+        video_url: 'https://www.bilibili.com/video/BV1same',
+        platform: 'bilibili',
+        mode: 'video_download',
+        video_resolution: '720',
+      },
+    }),
+    false
+  )
+})
+
 test('does not reuse the current task while that same task is still generating', () => {
   assert.equal(
     shouldReuseTaskForSubmission({

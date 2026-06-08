@@ -1,4 +1,4 @@
-import type { BatchVideo, FollowingUploader } from '@/services/note.ts'
+import type { BatchVideo, FollowingUploader, GenerationMode } from '@/services/note.ts'
 
 export type HomePageSourceType = 'single' | 'uploader_batch' | 'dynamics'
 export type HomePageUploaderSourceMode = 'manual' | 'followings'
@@ -9,6 +9,8 @@ export interface HomePageFormState {
   uploader_source_mode: HomePageUploaderSourceMode
   batch_limit: number
   platform: string
+  task_mode: GenerationMode
+  video_resolution: string
 }
 
 export interface HomePagePreviewState {
@@ -40,6 +42,8 @@ export function createDefaultHomePageFormState(): HomePageFormState {
     uploader_source_mode: 'manual',
     video_url: '',
     batch_limit: 0,
+    task_mode: 'polished_transcript',
+    video_resolution: 'best',
   }
 }
 

@@ -26,6 +26,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 function restoreTask(item: SavedTaskItem): Task | null {
   const result = asRecord(item?.result)
   const audioMeta = asRecord(result.audio_meta ?? result.audioMeta)
+  const videoDownload = asRecord(result.video_download)
   const rawInfo = asRecord(audioMeta.raw_info)
   const platform =
     (typeof audioMeta.platform === 'string' && audioMeta.platform) || item?.platform || ''
@@ -35,10 +36,18 @@ function restoreTask(item: SavedTaskItem): Task | null {
     (typeof rawInfo.url === 'string' && rawInfo.url) ||
     ''
   const markdown = typeof result.markdown === 'string' ? result.markdown : ''
+  const restoredMode: GenerationMode =
+    result.mode === 'video_download' ? 'video_download' : 'polished_transcript'
   const isPolishedTranscript =
     result.mode === 'polished_transcript' || markdown.includes('## 校对文字稿')
+  const isVideoDownload = result.mode === 'video_download'
 
-  if (!item?.task_id || !markdown || !isPolishedTranscript) return null
+  if (!item?.task_id || !markdown || (!isPolishedTranscript && !isVideoDownload)) return null
+
+  const restoredResolution =
+    typeof videoDownload.resolution === 'string' && videoDownload.resolution
+      ? videoDownload.resolution
+      : 'best'
 
   return {
     id: item.task_id,
@@ -72,10 +81,17 @@ function restoreTask(item: SavedTaskItem): Task | null {
       screenshot: false,
       platform,
       quality: 'fast',
-      model_name: typeof result.model_name === 'string' ? result.model_name : '',
+      model_name:
+        restoredMode === 'video_download'
+          ? ''
+          : typeof result.model_name === 'string'
+            ? result.model_name
+            : '',
       provider_id: '',
       style: typeof result.style === 'string' ? result.style : '',
-      mode: 'polished_transcript' as GenerationMode,
+      mode: restoredMode,
+      task_mode: restoredMode,
+      video_resolution: restoredResolution,
     },
   }
 }

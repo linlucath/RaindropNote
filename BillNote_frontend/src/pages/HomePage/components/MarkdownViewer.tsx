@@ -514,6 +514,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'failed') {
     const cancelled = taskStatus === 'CANCELLED'
+    const failureMessage = currentTask?.message || '请检查后台或稍后再试'
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
         <Error />
@@ -522,7 +523,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
             {cancelled ? '任务已取消' : '文字稿生成失败'}
           </p>
           <p className="mt-2 mb-2 text-xs text-red-400">
-            {cancelled ? '这个任务已经停止，不会继续执行。' : '请检查后台或稍后再试'}
+            {cancelled ? '这个任务已经停止，不会继续执行。' : failureMessage}
           </p>
           {!cancelled && currentTask ? (
             <Button

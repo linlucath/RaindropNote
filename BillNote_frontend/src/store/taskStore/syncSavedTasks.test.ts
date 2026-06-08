@@ -161,3 +161,46 @@ test('buildSyncedTasksState drops legacy note and raw transcript history returne
   )
   assert.equal(nextState.tasks[0].formData.mode, 'polished_transcript')
 })
+
+test('buildSyncedTasksState restores saved video download results with resolution', () => {
+  const nextState = buildSyncedTasksState({
+    savedTasks: [
+      {
+        task_id: 'task-video-download',
+        status: 'SUCCESS',
+        created_at: 1_778_730_003,
+        platform: 'bilibili',
+        result: {
+          markdown: '# 视频下载完成\n\n文件：`/tmp/BVdownload-1080p.mp4`',
+          mode: 'video_download',
+          audio_meta: {
+            video_id: 'BVdownload',
+            platform: 'bilibili',
+            title: '下载完成的视频',
+            file_path: '/tmp/BVdownload-1080p.mp4',
+            video_path: '/tmp/BVdownload-1080p.mp4',
+            raw_info: {
+              webpage_url: 'https://www.bilibili.com/video/BVdownload',
+            },
+          },
+          video_download: {
+            video_path: '/tmp/BVdownload-1080p.mp4',
+            resolution: '1080',
+          },
+        },
+      },
+    ],
+    existingTasks: [],
+    currentTaskId: null,
+    selectedTaskId: null,
+  })
+
+  assert.deepEqual(
+    nextState.tasks.map(task => task.id),
+    ['task-video-download']
+  )
+  assert.equal(nextState.tasks[0].formData.mode, 'video_download')
+  assert.equal(nextState.tasks[0].formData.task_mode, 'video_download')
+  assert.equal(nextState.tasks[0].formData.video_resolution, '1080')
+  assert.equal(nextState.tasks[0].audioMeta.video_path, '/tmp/BVdownload-1080p.mp4')
+})
