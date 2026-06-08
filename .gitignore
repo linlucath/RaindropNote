@@ -11,6 +11,7 @@ lerna-debug.log*
 /note_results/
 /BillNote_frontend/test-results/
 /bili_note.db
+/raindrop_note.db
 /vector_db/
 /.tmp-*.png
 # Diagnostic reports (https://nodejs.org/api/report.html)
