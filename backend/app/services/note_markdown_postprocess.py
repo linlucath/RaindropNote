@@ -5,9 +5,14 @@ from typing import Any, Callable, Optional
 from app.models.audio_model import AudioDownloadResult
 from app.utils.note_helper import replace_content_markers
 from app.utils.screenshot_marker import extract_screenshot_timestamps
-from app.utils.video_helper import generate_screenshot as default_generate_screenshot
 
 logger = logging.getLogger(__name__)
+
+
+def default_generate_screenshot(video_path: str, output_dir: str, timestamp: int, index: int) -> str:
+    from app.utils.video_helper import generate_screenshot
+
+    return generate_screenshot(video_path, output_dir, timestamp, index)
 
 
 def insert_screenshots(

@@ -14,7 +14,6 @@ from app.services.task_runtime import (
 )
 
 BATCH_OUTPUT_DIR = default_batch_output_dir()
-BATCH_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _batch_lock = Lock()
 _batches: dict[str, dict] = {}
