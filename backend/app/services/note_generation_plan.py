@@ -64,3 +64,8 @@ def write_audio_cache(audio_cache_file: Path, audio_meta: AudioDownloadResult) -
         json.dumps(asdict(audio_meta), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def write_markdown_cache(markdown_cache_file: Path, markdown: str) -> None:
+    markdown_cache_file.parent.mkdir(parents=True, exist_ok=True)
+    markdown_cache_file.write_text(markdown, encoding="utf-8")

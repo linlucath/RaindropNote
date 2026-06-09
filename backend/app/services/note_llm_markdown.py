@@ -6,6 +6,7 @@ from app.gpt.base import GPT
 from app.models.audio_model import AudioDownloadResult
 from app.models.gpt_model import GPTSource
 from app.models.transcriber_model import TranscriptResult
+from app.services import note_generation_plan
 from app.services import transcript_markdown
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def polish_transcript_markdown(
         f"# {title}",
         polished_text,
     ]).strip()
-    markdown_cache_file.write_text(markdown, encoding="utf-8")
+    note_generation_plan.write_markdown_cache(markdown_cache_file, markdown)
     logger.info(f"GPT 校对文字稿并缓存成功 ({markdown_cache_file})")
     return markdown
 
@@ -100,6 +101,6 @@ def summarize_note_markdown(
         video_img_urls=video_img_urls,
     )
     markdown = gpt.summarize(source)
-    markdown_cache_file.write_text(markdown, encoding="utf-8")
+    note_generation_plan.write_markdown_cache(markdown_cache_file, markdown)
     logger.info(f"GPT 总结并缓存成功 ({markdown_cache_file})")
     return markdown
