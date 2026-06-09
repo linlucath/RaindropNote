@@ -1,11 +1,11 @@
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
-from app.services.note import NoteGenerator, logger
 from app.services import note_task_results
 from app.services.progress_state import read_task_status
 from app.services.task_runtime import (
@@ -19,6 +19,12 @@ from app.services.task_runtime import (
 from app.services.task_serial_executor import get_task_executor
 
 NOTE_OUTPUT_DIR = default_note_output_dir()
+logger = logging.getLogger(__name__)
+
+# Compatibility patch hook for tests and legacy callers. The actual generator
+# import stays lazy so importing this task service does not load the full note
+# generation pipeline.
+NoteGenerator: Callable[[], Any] | None = None
 
 
 class NoteTaskValidationError(ValueError):
@@ -38,6 +44,15 @@ class TaskStatusView:
 
 def default_output_dir() -> Path:
     return Path(NOTE_OUTPUT_DIR)
+
+
+def default_note_generator_factory() -> Any:
+    if NoteGenerator is not None:
+        return NoteGenerator()
+
+    from app.services.note import NoteGenerator as note_generator_cls
+
+    return note_generator_cls()
 
 
 def normalize_generation_mode(mode: Optional[str]) -> str:
@@ -305,7 +320,7 @@ def run_note_task(
 ) -> None:
     mode = normalize_generation_mode(mode)
     video_resolution = normalize_video_resolution(video_resolution)
-    note_generator_factory = note_generator_factory or NoteGenerator
+    note_generator_factory = note_generator_factory or default_note_generator_factory
     executor_factory = executor_factory or get_task_executor
 
     if mode != VIDEO_DOWNLOAD_MODE and (not model_name or not provider_id):
