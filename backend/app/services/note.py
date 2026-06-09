@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List, Optional, Union, Any
 
 from pydantic import HttpUrl
-from dotenv import load_dotenv
 
 from app.downloaders.base import Downloader
 from app.enmus.task_status_enums import TaskStatus
@@ -32,9 +31,6 @@ from app.utils.path_helper import get_screenshot_dir
 
 # ------------------ 环境变量与全局配置 ------------------
 
-# 从 .env 文件中加载环境变量
-load_dotenv()
-
 # 后端 API 地址与端口（若有需要可以在代码其他部分使用 BACKEND_BASE_URL）
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost")
 BACKEND_PORT = os.getenv("BACKEND_PORT", "8483")
@@ -42,7 +38,6 @@ BACKEND_BASE_URL = f"{API_BASE_URL}:{BACKEND_PORT}"
 
 # 输出目录（用于缓存音频、转写、Markdown 文件，以及存储截图）
 NOTE_OUTPUT_DIR = default_note_output_dir()
-NOTE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 IMAGE_OUTPUT_DIR = get_screenshot_dir()
 # 图片基础 URL（用于生成 Markdown 中的图片链接，需前端静态目录对应）
 IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
@@ -200,7 +195,7 @@ class NoteGenerator:
 
             if mode_branch.is_transcript_only:
                 markdown = self._build_transcript_markdown(audio_meta=audio_meta, transcript=transcript)
-                cache_paths.markdown_cache_file.write_text(markdown, encoding="utf-8")
+                note_generation_plan.write_markdown_cache(cache_paths.markdown_cache_file, markdown)
 
                 self._cancel_if_requested(task_id)
                 return self._complete_generation(

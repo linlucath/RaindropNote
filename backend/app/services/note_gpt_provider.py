@@ -7,11 +7,18 @@ from app.exceptions.provider import ProviderError
 from app.gpt.base import GPT
 from app.gpt.gpt_factory import GPTFactory
 from app.models.model_config import ModelConfig
-from app.services.provider import ProviderService
 
 logger = logging.getLogger(__name__)
 
 ProviderLookup = Callable[[Optional[str]], Optional[Mapping[str, Any]]]
+
+
+class ProviderService:
+    @staticmethod
+    def get_provider_by_id(provider_id: Optional[str]) -> Optional[Mapping[str, Any]]:
+        from app.services.provider import ProviderService as provider_service
+
+        return provider_service.get_provider_by_id(provider_id)
 
 
 def build_gpt(
