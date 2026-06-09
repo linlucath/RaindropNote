@@ -89,6 +89,21 @@ class TestNoteLlmMarkdown(unittest.TestCase):
 
         self.assertEqual(markdown, "# 未命名视频\n\n正文")
 
+    def test_polish_transcript_markdown_creates_cache_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "nested" / "fallback.md"
+            gpt = Mock()
+            gpt.polish_transcript.return_value = "正文"
+
+            note_llm_markdown.polish_transcript_markdown(
+                audio_meta=_audio_meta(None),
+                transcript=_transcript(),
+                gpt=gpt,
+                markdown_cache_file=cache_file,
+            )
+
+            self.assertEqual(cache_file.read_text(encoding="utf-8"), "# 未命名视频\n\n正文")
+
     def test_build_summarize_source_matches_note_generator_fields(self):
         cache_file = Path("/tmp/summary-task.md")
         audio_meta = _audio_meta("Summary Title")
@@ -149,6 +164,27 @@ class TestNoteLlmMarkdown(unittest.TestCase):
         self.assertTrue(source.screenshot)
         self.assertFalse(source.link)
         self.assertIsNone(source.language)
+
+    def test_summarize_note_markdown_creates_cache_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_file = Path(tmp) / "nested" / "summary-cache.md"
+            gpt = Mock()
+            gpt.summarize.return_value = "# Summary\n\nBody"
+
+            markdown = note_llm_markdown.summarize_note_markdown(
+                audio_meta=_audio_meta("Summary Title"),
+                transcript=_transcript("en"),
+                gpt=gpt,
+                markdown_cache_file=cache_file,
+                link=False,
+                screenshot=False,
+                formats=[],
+                style=None,
+                extras=None,
+                video_img_urls=[],
+            )
+
+            self.assertEqual(cache_file.read_text(encoding="utf-8"), markdown)
 
 
 if __name__ == "__main__":
