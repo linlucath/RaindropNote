@@ -3,7 +3,6 @@ from types import SimpleNamespace
 from app.services.bilibili_cookie_bootstrap import (
     BilibiliCookieBootstrapService,
     discovery_browser_order,
-    schedule_cookie_bootstrap,
 )
 
 
@@ -104,34 +103,24 @@ def test_bootstrap_ignores_browser_and_validation_failures():
     assert saved == [('bilibili', 'SESSDATA=good; DedeUserID=12345')]
 
 
-def test_schedule_cookie_bootstrap_skips_when_cookie_exists():
-    started = []
-    cookie_manager = SimpleNamespace(get=lambda _platform: 'SESSDATA=configured')
-
-    schedule_cookie_bootstrap(
-        cookie_manager=cookie_manager,
-        bootstrap_runner=lambda: started.append('ran'),
-        thread_factory=lambda **kwargs: SimpleNamespace(start=lambda: started.append(kwargs)),
+def test_import_cookie_refreshes_even_when_cookie_already_exists():
+    saved = []
+    cookie_manager = SimpleNamespace(
+        get=lambda _platform: 'SESSDATA=old; DedeUserID=1',
+        set=lambda platform, cookie: saved.append((platform, cookie)),
     )
 
-    assert started == []
-
-
-def test_schedule_cookie_bootstrap_starts_background_thread():
-    started = []
-    thread_kwargs = {}
-    cookie_manager = SimpleNamespace(get=lambda _platform: '')
-
-    def thread_factory(**kwargs):
-        thread_kwargs.update(kwargs)
-        return SimpleNamespace(start=lambda: started.append('started'))
-
-    schedule_cookie_bootstrap(
+    service = BilibiliCookieBootstrapService(
         cookie_manager=cookie_manager,
-        bootstrap_runner=lambda: started.append('ran'),
-        thread_factory=thread_factory,
+        browser_reader=lambda _browser: [
+            SimpleNamespace(domain='.bilibili.com', name='SESSDATA', value='new'),
+            SimpleNamespace(domain='.bilibili.com', name='DedeUserID', value='12345'),
+        ],
+        validator=lambda cookie: cookie,
+        system_name='Windows',
     )
 
-    assert started == ['started']
-    assert thread_kwargs['daemon'] is True
-    assert callable(thread_kwargs['target'])
+    cookie = service.import_cookie()
+
+    assert cookie == 'SESSDATA=new; DedeUserID=12345'
+    assert saved == [('bilibili', 'SESSDATA=new; DedeUserID=12345')]

@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.services.bilibili_api_client import BilibiliApiClient
+from app.services.bilibili_cookie_bootstrap import BilibiliCookieBootstrapService
 from app.services.bilibili_cookie_parser import extract_bilibili_cookie
 from app.services.cookie_manager import CookieConfigManager
 from app.utils.response import ResponseWrapper as R
@@ -27,6 +28,14 @@ def validate_bilibili_cookie(cookie: str) -> str:
     return client.validate_cookie(cookie)
 
 
+def import_bilibili_cookie_from_browser() -> str:
+    service = BilibiliCookieBootstrapService(
+        cookie_manager=cookie_manager,
+        validator=validate_bilibili_cookie,
+    )
+    return service.import_cookie()
+
+
 @router.get("/get_downloader_cookie/{platform}")
 def get_cookie(platform: str):
     cookie = cookie_manager.get(platform)
@@ -46,6 +55,17 @@ def update_cookie(data: CookieUpdateRequest):
         else:
             cookie_manager.set(data.platform, raw_cookie)
         return R.success()
+    except ValueError as exc:
+        return R.error(msg=str(exc))
+
+
+@router.post("/import_downloader_cookie/{platform}")
+def import_cookie(platform: str):
+    try:
+        if platform != 'bilibili':
+            raise ValueError('仅支持导入 Bilibili Cookie')
+        cookie = import_bilibili_cookie_from_browser()
+        return R.success(data={'platform': platform, 'cookie': cookie})
     except ValueError as exc:
         return R.error(msg=str(exc))
 

@@ -12,8 +12,8 @@ test('downloader form uses a multiline textarea for cookie input', () => {
   assert.match(formSource, /<Textarea/)
 })
 
-test('bilibili helper copy mentions supported paste formats', () => {
-  assert.match(formSource, /原始 Cookie/)
-  assert.match(formSource, /Cookie:/)
-  assert.match(formSource, /curl/)
+test('bilibili form exposes a browser import button without extra description copy', () => {
+  assert.match(formSource, /从浏览器获取/)
+  assert.doesNotMatch(formSource, /FormDescription/)
+  assert.doesNotMatch(formSource, /保存时会自动提取并校验/)
 })

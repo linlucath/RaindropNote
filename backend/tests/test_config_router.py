@@ -78,3 +78,29 @@ def test_update_cookie_for_non_bilibili_keeps_trimmed_save_behavior(monkeypatch)
 
     assert saved == [('youtube', 'SID=abc123')]
     assert _json_body(response)['code'] == 0
+
+
+def test_import_cookie_for_bilibili_uses_browser_import_and_returns_saved_cookie(monkeypatch):
+    monkeypatch.setattr(
+        config_router,
+        'import_bilibili_cookie_from_browser',
+        lambda: 'SESSDATA=imported; DedeUserID=12345',
+        raising=False,
+    )
+
+    response = config_router.import_cookie('bilibili')
+
+    body = _json_body(response)
+    assert body['code'] == 0
+    assert body['data'] == {
+        'platform': 'bilibili',
+        'cookie': 'SESSDATA=imported; DedeUserID=12345',
+    }
+
+
+def test_import_cookie_for_non_bilibili_returns_error(monkeypatch):
+    response = config_router.import_cookie('youtube')
+
+    body = _json_body(response)
+    assert body['code'] == 500
+    assert body['msg'] == '仅支持导入 Bilibili Cookie'

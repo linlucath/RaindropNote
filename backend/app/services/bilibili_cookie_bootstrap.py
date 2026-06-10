@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import platform
-import threading
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -59,6 +58,13 @@ class BilibiliCookieBootstrapService:
         if (self.cookie_manager.get('bilibili') or '').strip():
             self.logger.info('Skip Bilibili cookie bootstrap because cookie already exists')
             return None
+        return self.import_cookie()
+
+    def import_cookie(self) -> str:
+        return self._import_cookie_from_browsers()
+
+    def _import_cookie_from_browsers(self) -> str:
+        last_error: Exception | None = None
 
         for browser in discovery_browser_order(self.system_name):
             try:
@@ -71,19 +77,9 @@ class BilibiliCookieBootstrapService:
                 self.logger.info('Bootstrapped Bilibili cookie from browser: %s', browser)
                 return validated
             except Exception as exc:
+                last_error = exc
                 self.logger.info('Bilibili cookie bootstrap failed for browser %s: %s', browser, exc)
 
-        return None
-
-
-def schedule_cookie_bootstrap(
-    *,
-    cookie_manager,
-    bootstrap_runner: Callable[[], Any],
-    thread_factory: Callable[..., Any] = threading.Thread,
-) -> None:
-    if (cookie_manager.get('bilibili') or '').strip():
-        return
-
-    thread = thread_factory(target=bootstrap_runner, daemon=True, name='bilibili-cookie-bootstrap')
-    thread.start()
+        if last_error is not None:
+            raise ValueError('未能从浏览器获取可用的 Bilibili Cookie') from last_error
+        raise ValueError('未能从浏览器获取可用的 Bilibili Cookie')
