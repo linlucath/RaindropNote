@@ -96,8 +96,15 @@ jobs:
         working-directory: BillNote_frontend
         run: pnpm desktop:build:ci:linux
 
-      - name: Build Tauri App on non-Linux
-        if: runner.os != 'Linux'
+      # Windows 上的 WiX MSI 链接阶段目前不稳定，
+      # CI 只保留更稳定的 NSIS 安装包产物。
+      - name: Build Tauri App on Windows
+        if: runner.os == 'Windows'
+        working-directory: BillNote_frontend
+        run: pnpm desktop:build:ci:windows
+
+      - name: Build Tauri App on macOS
+        if: runner.os == 'macOS'
         working-directory: BillNote_frontend
         run: pnpm desktop:build:ci
 
@@ -117,7 +124,7 @@ jobs:
               ARTIFACT_PATTERNS=("*.deb" "*.rpm")
               ;;
             Windows)
-              ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")
+              ARTIFACT_PATTERNS=("nsis/*.exe")
               ;;
             *)
               echo "Unsupported runner OS: $RUNNER_OS" >&2

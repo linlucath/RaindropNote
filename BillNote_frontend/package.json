@@ -10,6 +10,7 @@
     "desktop:build": "tauri build",
     "desktop:build:ci": "tauri build --ci",
     "desktop:build:ci:linux": "tauri build --ci --bundles deb,rpm",
+    "desktop:build:ci:windows": "tauri build --ci --bundles nsis",
     "lint": "eslint .",
     "preview": "vite preview",
     "smoke": "playwright test"
