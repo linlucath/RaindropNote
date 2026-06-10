@@ -13,7 +13,7 @@ test('downloader form uses a multiline textarea for cookie input', () => {
 })
 
 test('bilibili form exposes a browser import button without extra description copy', () => {
-  assert.match(formSource, /从浏览器获取\\(实验性功能\\)/)
+  assert.match(formSource, /从浏览器获取\(实验性功能\)/)
   assert.doesNotMatch(formSource, /FormDescription/)
   assert.doesNotMatch(formSource, /保存时会自动提取并校验/)
 })
