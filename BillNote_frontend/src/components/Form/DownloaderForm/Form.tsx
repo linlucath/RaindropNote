@@ -8,10 +8,11 @@ import {
   FormItem,
   FormLabel,
   FormControl,
+  FormDescription,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { getDownloaderCookie, updateDownloaderCookie } from '@/services/downloader' // 你自定义的请求
@@ -78,8 +79,21 @@ const DownloaderForm = () => {
               <FormItem className="flex flex-col gap-2">
                 <FormLabel>Cookie</FormLabel>
                 <FormControl>
-                  <Input {...field} placeholder="输入 Cookie" />
+                  <Textarea
+                    {...field}
+                    className="min-h-40 font-mono text-sm"
+                    placeholder={
+                      id === 'bilibili'
+                        ? '支持粘贴原始 Cookie、Cookie: 请求头，或包含 Cookie 的 curl 命令'
+                        : '输入 Cookie'
+                    }
+                  />
                 </FormControl>
+                {id === 'bilibili' ? (
+                  <FormDescription>
+                    支持粘贴原始 Cookie、`Cookie:` 请求头，或整段 `curl` 命令，保存时会自动提取并校验。
+                  </FormDescription>
+                ) : null}
                 <FormMessage />
               </FormItem>
             )}

@@ -121,3 +121,21 @@ def test_request_json_allows_custom_headers_and_business_error_messages():
             'timeout': 15,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ('cookie', 'message'),
+    [
+        ('DedeUserID=12345;', 'Bilibili Cookie 缺少 SESSDATA'),
+        ('SESSDATA=test;', 'Bilibili Cookie 缺少 DedeUserID'),
+    ],
+)
+def test_validate_cookie_rejects_missing_required_keys(cookie, message):
+    client = BilibiliApiClient(
+        cookie_getter=lambda _platform: '',
+        referer='https://space.bilibili.com/',
+        origin='https://space.bilibili.com',
+    )
+
+    with pytest.raises(ValueError, match=message):
+        client.validate_cookie(cookie)

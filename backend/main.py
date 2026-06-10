@@ -11,6 +11,12 @@ from dotenv import load_dotenv
 from app.db.init_db import init_db
 from app.db.provider_dao import seed_default_providers
 from app.exceptions.exception_handlers import register_exception_handlers
+from app.services.bilibili_api_client import BilibiliApiClient
+from app.services.bilibili_cookie_bootstrap import (
+    BilibiliCookieBootstrapService,
+    schedule_cookie_bootstrap,
+)
+from app.services.cookie_manager import CookieConfigManager
 # from app.db.model_dao import init_model_table
 # from app.db.provider_dao import init_provider_table
 from app.utils.logger import get_logger
@@ -20,6 +26,7 @@ from events import register_handler
 
 logger = get_logger(__name__)
 load_dotenv()
+cookie_manager = CookieConfigManager()
 
 # 读取 .env 中的路径
 static_path = os.getenv('STATIC', '/static')
@@ -36,12 +43,30 @@ if not os.path.exists(uploads_dir):
 if not os.path.exists(out_dir):
     os.makedirs(out_dir)
 
+
+def bootstrap_bilibili_cookie() -> None:
+    client = BilibiliApiClient(
+        cookie_getter=lambda _platform: '',
+        referer='https://www.bilibili.com/',
+        origin='https://www.bilibili.com',
+    )
+    service = BilibiliCookieBootstrapService(
+        cookie_manager=cookie_manager,
+        validator=client.validate_cookie,
+        request_logger=logger,
+    )
+    service.bootstrap()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     register_handler()
     init_db()
     logger.info("当前为平台字幕优先模式，不再初始化音频转写配置")
     seed_default_providers()
+    schedule_cookie_bootstrap(
+        cookie_manager=cookie_manager,
+        bootstrap_runner=bootstrap_bilibili_cookie,
+    )
     yield
 
 app = create_app(lifespan=lifespan)

@@ -3,6 +3,8 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.services.bilibili_api_client import BilibiliApiClient
+from app.services.bilibili_cookie_parser import extract_bilibili_cookie
 from app.services.cookie_manager import CookieConfigManager
 from app.utils.response import ResponseWrapper as R
 from ffmpeg_helper import ensure_ffmpeg_or_raise
@@ -16,6 +18,15 @@ class CookieUpdateRequest(BaseModel):
     cookie: str
 
 
+def validate_bilibili_cookie(cookie: str) -> str:
+    client = BilibiliApiClient(
+        cookie_getter=lambda _platform: '',
+        referer='https://www.bilibili.com/',
+        origin='https://www.bilibili.com',
+    )
+    return client.validate_cookie(cookie)
+
+
 @router.get("/get_downloader_cookie/{platform}")
 def get_cookie(platform: str):
     cookie = cookie_manager.get(platform)
@@ -26,8 +37,17 @@ def get_cookie(platform: str):
 
 @router.post("/update_downloader_cookie")
 def update_cookie(data: CookieUpdateRequest):
-    cookie_manager.set(data.platform, data.cookie)
-    return R.success()
+    try:
+        raw_cookie = (data.cookie or '').strip()
+        if data.platform == 'bilibili':
+            normalized_cookie = extract_bilibili_cookie(raw_cookie)
+            validated_cookie = validate_bilibili_cookie(normalized_cookie)
+            cookie_manager.set(data.platform, validated_cookie)
+        else:
+            cookie_manager.set(data.platform, raw_cookie)
+        return R.success()
+    except ValueError as exc:
+        return R.error(msg=str(exc))
 
 
 @router.get("/sys_health")

@@ -6,6 +6,7 @@ from typing import Any, Callable
 import requests
 
 BILIBILI_COOKIE_INVALID_CODES = {-101, 22007, 22115}
+BILIBILI_NAV_API_URL = 'https://api.bilibili.com/x/web-interface/nav'
 BILIBILI_USER_AGENT = (
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -29,6 +30,23 @@ class BilibiliApiClient:
         if not cookie:
             raise ValueError('请先在设置页填写 Bilibili Cookie')
         return cookie
+
+    def validate_cookie(self, cookie: str) -> str:
+        normalized_cookie = cookie.strip()
+        if 'SESSDATA=' not in normalized_cookie:
+            raise ValueError('Bilibili Cookie 缺少 SESSDATA')
+        if 'DedeUserID=' not in normalized_cookie:
+            raise ValueError('Bilibili Cookie 缺少 DedeUserID')
+
+        payload = self.request_json(
+            BILIBILI_NAV_API_URL,
+            fallback_error='Bilibili Cookie 已失效，请重新登录后更新',
+            cookie=normalized_cookie,
+        )
+        data = payload.get('data') or {}
+        if data.get('isLogin') is False:
+            raise ValueError('Bilibili Cookie 已失效，请重新登录后更新')
+        return normalized_cookie
 
     def build_headers(self, cookie: str | None = None) -> dict[str, str]:
         active_cookie = self.get_cookie() if cookie is None else cookie
