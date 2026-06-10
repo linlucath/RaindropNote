@@ -193,6 +193,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+.worktrees/
 
 # Translations
 *.mo
