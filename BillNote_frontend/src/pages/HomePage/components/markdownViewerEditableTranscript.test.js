@@ -37,3 +37,10 @@ test('MarkdownViewer does not pass react-markdown list metadata to DOM list item
   assert.match(markdownViewerSource, /<ul className="my-6 ml-6 list-disc \[&>li\]:mt-2" \{\.\.\.listProps\}>/)
   assert.match(markdownViewerSource, /<ol className="my-6 ml-6 list-decimal \[&>li\]:mt-2" \{\.\.\.listProps\}>/)
 })
+
+test('MarkdownViewer shows an open-video button for subtitle-only failures with a source URL', () => {
+  assert.match(markdownViewerSource, /currentTask\?\.formData\?\.video_url/)
+  assert.match(markdownViewerSource, /AUDIO_TRANSCRIPTION_REMOVED_MESSAGE/)
+  assert.match(markdownViewerSource, /window\.open\(currentTask\.formData\.video_url, '_blank', 'noopener,noreferrer'\)/)
+  assert.match(markdownViewerSource, />\s*打开视频\s*</)
+})

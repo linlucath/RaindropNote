@@ -52,6 +52,7 @@ import {
   deleteFavorite,
   getFavoriteByTask,
 } from '@/services/favorite.ts'
+import { AUDIO_TRANSCRIPTION_REMOVED_MESSAGE } from '@/hooks/taskPollingErrorHandling.ts'
 
 interface MarkdownViewerProps {
   status: 'idle' | 'loading' | 'success' | 'failed'
@@ -515,6 +516,10 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   if (status === 'failed') {
     const cancelled = taskStatus === 'CANCELLED'
     const failureMessage = currentTask?.message || '请检查后台或稍后再试'
+    const canOpenSourceVideo =
+      !cancelled &&
+      Boolean(currentTask?.formData?.video_url) &&
+      failureMessage.includes(AUDIO_TRANSCRIPTION_REMOVED_MESSAGE)
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
         <Error />
@@ -526,15 +531,29 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
             {cancelled ? '这个任务已经停止，不会继续执行。' : failureMessage}
           </p>
           {!cancelled && currentTask ? (
-            <Button
-              onClick={() => {
-                setCurrentTask(currentTask.id)
-                retryTask(currentTask.id)
-              }}
-              size="lg"
-            >
-              重试
-            </Button>
+            <div className="flex items-center justify-center gap-2">
+              {canOpenSourceVideo ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={() =>
+                    window.open(currentTask.formData.video_url, '_blank', 'noopener,noreferrer')
+                  }
+                >
+                  打开视频
+                </Button>
+              ) : null}
+              <Button
+                onClick={() => {
+                  setCurrentTask(currentTask.id)
+                  retryTask(currentTask.id)
+                }}
+                size="lg"
+              >
+                重试
+              </Button>
+            </div>
           ) : null}
         </div>
       </div>
