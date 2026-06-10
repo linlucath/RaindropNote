@@ -81,9 +81,11 @@ def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_p
 def test_build_bat_uses_backend_relative_assets_from_repo_root():
     build_bat = (Path(__file__).parents[1] / "build.bat").read_text(encoding="utf-8")
 
-    assert "copy backend\\.env.example backend\\.env" in build_bat
-    assert '--add-data "backend\\app\\db\\builtin_providers.json;."' in build_bat
-    assert '--add-data "backend\\.env;."' in build_bat
+    assert 'set "BACKEND_DIR=%REPO_ROOT%\\backend"' in build_bat
+    assert 'pushd "%BACKEND_DIR%"' in build_bat
+    assert '--add-data "app\\db\\builtin_providers.json;."' in build_bat
+    assert '--add-data ".env;."' in build_bat
+    assert "main.py" in build_bat
 
 
 def test_tauri_sidecar_contract_matches_backend_build_scripts():
