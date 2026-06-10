@@ -93,7 +93,7 @@ const DownloaderForm = () => {
 
           {id === 'bilibili' ? (
             <Button type="button" variant="outline" onClick={onImportCookie} disabled={importing}>
-              {importing ? '获取中...' : '从浏览器获取'}
+              {importing ? '获取中...' : '从浏览器获取(实验性功能)'}
             </Button>
           ) : null}
 
