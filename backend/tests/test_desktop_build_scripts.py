@@ -157,8 +157,12 @@ def test_desktop_workflow_uses_host_targets_without_unused_matrix_target():
     assert "pnpm tauri build --target" not in workflow
     assert package_json["scripts"]["desktop:build"] == "tauri build"
     assert package_json["scripts"]["desktop:build:ci"] == "tauri build --ci"
+    assert package_json["scripts"]["desktop:build:ci:linux"] == "tauri build --ci --bundles deb,rpm"
     assert "pnpm install --frozen-lockfile" in workflow
-    assert "pnpm desktop:build:ci" in workflow
+    assert "Build Tauri App on Linux" in workflow
+    assert "run: pnpm desktop:build:ci:linux" in workflow
+    assert "Build Tauri App on non-Linux" in workflow
+    assert "run: pnpm desktop:build:ci" in workflow
 
 
 def test_desktop_workflow_uses_the_project_pnpm_version():
@@ -178,7 +182,7 @@ def test_desktop_workflow_fails_when_release_artifacts_are_missing():
     workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
 
     assert 'ARTIFACT_PATTERNS=("*.dmg")' in workflow
-    assert 'ARTIFACT_PATTERNS=("*.deb" "*.AppImage")' in workflow
+    assert 'ARTIFACT_PATTERNS=("*.deb" "*.rpm")' in workflow
     assert 'ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")' in workflow
     assert '[[ "$FOUND_ARTIFACTS" -gt 0 ]]' in workflow
     assert 'No release artifacts found for $RUNNER_OS' in workflow

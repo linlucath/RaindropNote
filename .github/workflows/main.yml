@@ -89,8 +89,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('BillNote_frontend/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      # 打包 Tauri 应用
-      - name: Build Tauri App
+      # Linux 上的 AppImage 构建目前会卡在 tauri/linuxdeploy，
+      # 先稳定产出 deb/rpm，避免整条发布流水线被上游问题拖挂。
+      - name: Build Tauri App on Linux
+        if: runner.os == 'Linux'
+        working-directory: BillNote_frontend
+        run: pnpm desktop:build:ci:linux
+
+      - name: Build Tauri App on non-Linux
+        if: runner.os != 'Linux'
         working-directory: BillNote_frontend
         run: pnpm desktop:build:ci
 
@@ -107,7 +114,7 @@ jobs:
               ARTIFACT_PATTERNS=("*.dmg")
               ;;
             Linux)
-              ARTIFACT_PATTERNS=("*.deb" "*.AppImage")
+              ARTIFACT_PATTERNS=("*.deb" "*.rpm")
               ;;
             Windows)
               ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")

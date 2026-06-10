@@ -9,6 +9,7 @@
     "build": "vite build",
     "desktop:build": "tauri build",
     "desktop:build:ci": "tauri build --ci",
+    "desktop:build:ci:linux": "tauri build --ci --bundles deb,rpm",
     "lint": "eslint .",
     "preview": "vite preview",
     "smoke": "playwright test"
