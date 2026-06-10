@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 import stat
+import struct
 import subprocess
 from pathlib import Path
 
@@ -11,6 +12,19 @@ from pathlib import Path
 def _write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _read_png_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as png_file:
+        signature = png_file.read(8)
+        if signature != b"\x89PNG\r\n\x1a\n":
+            raise ValueError(f"{path} is not a PNG file")
+        _chunk_size = png_file.read(4)
+        chunk_type = png_file.read(4)
+        if chunk_type != b"IHDR":
+            raise ValueError(f"{path} is missing a PNG IHDR chunk")
+        width, height = struct.unpack(">II", png_file.read(8))
+    return width, height
 
 
 def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_path: Path):
@@ -81,9 +95,11 @@ def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_p
 def test_build_bat_uses_backend_relative_assets_from_repo_root():
     build_bat = (Path(__file__).parents[1] / "build.bat").read_text(encoding="utf-8")
 
-    assert "copy backend\\.env.example backend\\.env" in build_bat
-    assert '--add-data "backend\\app\\db\\builtin_providers.json;."' in build_bat
-    assert '--add-data "backend\\.env;."' in build_bat
+    assert 'set "BACKEND_DIR=%REPO_ROOT%\\backend"' in build_bat
+    assert 'pushd "%BACKEND_DIR%"' in build_bat
+    assert '--add-data "app\\db\\builtin_providers.json;."' in build_bat
+    assert '--add-data ".env;."' in build_bat
+    assert "main.py" in build_bat
 
 
 def test_tauri_sidecar_contract_matches_backend_build_scripts():
@@ -109,6 +125,22 @@ def test_tauri_sidecar_contract_matches_backend_build_scripts():
     ]
     assert "RaindropNoteBackend-$TARGET_TRIPLE" in build_sh
     assert "RaindropNoteBackend-%TARGET_TRIPLE%.exe" in build_bat
+
+
+def test_tauri_bundle_png_icons_are_square_for_linux_appimage():
+    repo_root = Path(__file__).parents[2]
+    tauri_dir = repo_root / "BillNote_frontend" / "src-tauri"
+    tauri_config = json.loads((tauri_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+
+    png_icons = [Path(icon_path) for icon_path in tauri_config["bundle"]["icon"] if icon_path.endswith(".png")]
+
+    assert png_icons, "Tauri bundle config should include at least one PNG icon"
+
+    for relative_icon_path in png_icons:
+        width, height = _read_png_dimensions(tauri_dir / relative_icon_path)
+        assert width == height, (
+            f"{relative_icon_path} is {width}x{height}; AppImage bundling requires a square PNG icon"
+        )
 
 
 def test_desktop_workflow_uses_host_targets_without_unused_matrix_target():
