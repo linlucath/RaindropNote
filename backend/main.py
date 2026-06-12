@@ -49,6 +49,10 @@ origins = [
     "http://localhost",
     "http://127.0.0.1",
     "http://tauri.localhost",
+    "https://localhost",
+    "https://127.0.0.1",
+    "https://tauri.localhost",
+    "tauri://localhost",
 ]
 
 app.add_middleware(
