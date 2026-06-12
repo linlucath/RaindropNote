@@ -53,6 +53,7 @@ import {
   getFavoriteByTask,
 } from '@/services/favorite.ts'
 import { AUDIO_TRANSCRIPTION_REMOVED_MESSAGE } from '@/hooks/taskPollingErrorHandling.ts'
+import { runtimeStaticBaseUrl } from '@/utils/runtimeBaseUrl'
 
 interface MarkdownViewerProps {
   status: 'idle' | 'loading' | 'success' | 'failed'
@@ -305,10 +306,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [modelName, setModelName] = useState<string>('')
   const [createTime, setCreateTime] = useState<string>('')
-  // 确保baseURL没有尾部斜杠
-  const baseURL = (
-    String(import.meta.env.VITE_API_BASE_URL || '').replace('/api', '') || ''
-  ).replace(/\/$/, '')
+  const baseURL = runtimeStaticBaseUrl
   const getSelectedTask = useTaskStore.getState().getSelectedTask
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
   const updateTaskContent = useTaskStore(state => state.updateTaskContent)
