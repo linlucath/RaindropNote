@@ -57,9 +57,13 @@ def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_p
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
         "distpath=''\n"
+        "name=''\n"
+        "windowed=0\n"
         "while [ \"$#\" -gt 0 ]; do\n"
         "  case \"$1\" in\n"
         "    --distpath) distpath=\"$2\"; shift 2 ;;\n"
+        "    --name) name=\"$2\"; shift 2 ;;\n"
+        "    --windowed) windowed=1; shift ;;\n"
         "    --add-data)\n"
         "      source_path=\"${2%%:*}\"\n"
         "      test -f \"$source_path\"\n"
@@ -67,8 +71,19 @@ def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_p
         "    *) shift ;;\n"
         "  esac\n"
         "done\n"
-        "mkdir -p \"$distpath/RaindropNoteBackend/_internal\"\n"
-        "touch \"$distpath/RaindropNoteBackend/RaindropNoteBackend\"\n",
+        "if [ \"$windowed\" -eq 1 ]; then\n"
+        "  app_dir=\"$distpath/$name.app/Contents\"\n"
+        "  mkdir -p \"$app_dir/MacOS\" \"$app_dir/Resources\" \"$app_dir/_CodeSignature\"\n"
+        "  touch \"$app_dir/MacOS/$name\" \"$app_dir/_CodeSignature/CodeResources\"\n"
+        "else\n"
+        "  mkdir -p \"$distpath/$name/_internal\"\n"
+        "  touch \"$distpath/$name/$name\"\n"
+        "fi\n",
+    )
+    _write_executable(
+        fake_bin_dir / "codesign",
+        "#!/usr/bin/env bash\n"
+        "exit 0\n",
     )
 
     env = {
@@ -88,6 +103,9 @@ def test_build_sh_runs_from_backend_directory_with_backend_relative_assets(tmp_p
     assert result.returncode == 0, result.stderr + result.stdout
     assert (
         tauri_bin_dir / "RaindropNoteBackend" / "RaindropNoteBackend-x86_64-test-platform"
+    ).exists()
+    assert (
+        tauri_bin_dir / "RaindropNoteBackend.app" / "Contents" / "MacOS" / "RaindropNoteBackend"
     ).exists()
     assert not (backend_dir / ".env").exists()
 
@@ -120,10 +138,16 @@ def test_tauri_sidecar_contract_matches_backend_build_scripts():
     ]
 
     assert external_bins == ["bin/RaindropNoteBackend/RaindropNoteBackend"]
+    assert tauri_config["bundle"]["macOS"]["files"] == {
+        "Resources/RaindropNoteBackend.app": "bin/RaindropNoteBackend.app"
+    }
     assert shell_permissions[0]["allow"] == [
         {"name": "RaindropNoteBackend", "sidecar": True}
     ]
     assert "RaindropNoteBackend-$TARGET_TRIPLE" in build_sh
+    assert "--windowed" in build_sh
+    assert "RaindropNoteBackend.app" in build_sh
+    assert 'codesign --verify --deep --strict --verbose=2 "$TAURI_BIN_DIR/RaindropNoteBackend.app"' in build_sh
     assert "RaindropNoteBackend-%TARGET_TRIPLE%.exe" in build_bat
 
 
@@ -157,8 +181,15 @@ def test_desktop_workflow_uses_host_targets_without_unused_matrix_target():
     assert "pnpm tauri build --target" not in workflow
     assert package_json["scripts"]["desktop:build"] == "tauri build"
     assert package_json["scripts"]["desktop:build:ci"] == "tauri build --ci"
+    assert package_json["scripts"]["desktop:build:ci:linux"] == "tauri build --ci --bundles deb,rpm"
+    assert package_json["scripts"]["desktop:build:ci:windows"] == "tauri build --ci --bundles nsis"
     assert "pnpm install --frozen-lockfile" in workflow
-    assert "pnpm desktop:build:ci" in workflow
+    assert "Build Tauri App on Linux" in workflow
+    assert "run: pnpm desktop:build:ci:linux" in workflow
+    assert "Build Tauri App on Windows" in workflow
+    assert "run: pnpm desktop:build:ci:windows" in workflow
+    assert "Build Tauri App on macOS" in workflow
+    assert "run: pnpm desktop:build:ci" in workflow
 
 
 def test_desktop_workflow_uses_the_project_pnpm_version():
@@ -178,8 +209,8 @@ def test_desktop_workflow_fails_when_release_artifacts_are_missing():
     workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
 
     assert 'ARTIFACT_PATTERNS=("*.dmg")' in workflow
-    assert 'ARTIFACT_PATTERNS=("*.deb" "*.AppImage")' in workflow
-    assert 'ARTIFACT_PATTERNS=("*.msi" "nsis/*.exe")' in workflow
+    assert 'ARTIFACT_PATTERNS=("*.deb" "*.rpm")' in workflow
+    assert 'ARTIFACT_PATTERNS=("nsis/*.exe")' in workflow
     assert '[[ "$FOUND_ARTIFACTS" -gt 0 ]]' in workflow
     assert 'No release artifacts found for $RUNNER_OS' in workflow
     assert "-exec cp {} release-artifacts/ \\; 2>/dev/null || true" not in workflow
