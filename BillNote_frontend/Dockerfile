@@ -1,7 +1,7 @@
 # === 前端构建阶段 ===
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 WORKDIR /app
 

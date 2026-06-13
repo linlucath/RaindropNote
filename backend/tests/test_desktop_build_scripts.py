@@ -285,3 +285,33 @@ def test_complete_dockerfile_uses_frozen_frontend_lockfile():
 
     assert "COPY ./BillNote_frontend/package.json ./BillNote_frontend/pnpm-lock.yaml ./" in dockerfile
     assert "RUN pnpm install --frozen-lockfile" in dockerfile
+
+
+def test_dockerfiles_use_the_project_pnpm_version():
+    repo_root = Path(__file__).parents[2]
+    package_json = json.loads(
+        (repo_root / "BillNote_frontend" / "package.json").read_text(encoding="utf-8")
+    )
+
+    package_manager = package_json["packageManager"]
+
+    assert package_manager == "pnpm@10.33.0"
+    for dockerfile_path in [
+        repo_root / "Dockerfile.complete",
+        repo_root / "BillNote_frontend" / "Dockerfile",
+    ]:
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
+        assert f"corepack prepare {package_manager} --activate" in dockerfile
+        assert "corepack prepare pnpm@latest --activate" not in dockerfile
+
+
+def test_dockerfiles_use_node_20_for_tailwind_native_bindings():
+    repo_root = Path(__file__).parents[2]
+
+    for dockerfile_path in [
+        repo_root / "Dockerfile.complete",
+        repo_root / "BillNote_frontend" / "Dockerfile",
+    ]:
+        dockerfile = dockerfile_path.read_text(encoding="utf-8")
+        assert "FROM node:20-alpine" in dockerfile
+        assert "FROM node:18-alpine" not in dockerfile

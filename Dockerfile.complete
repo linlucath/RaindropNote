@@ -26,9 +26,9 @@ RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt
 COPY ./backend /tmp/backend
 
 # === 阶段2：构建 Frontend ===
-FROM node:18-alpine AS frontend-builder
+FROM node:20-alpine AS frontend-builder
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 WORKDIR /tmp/frontend
 
