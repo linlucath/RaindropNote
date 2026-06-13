@@ -89,6 +89,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('BillNote_frontend/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Clean stale Tauri bundle artifacts
+        shell: bash
+        run: rm -rf BillNote_frontend/src-tauri/target/release/bundle
+
       # Linux 上的 AppImage 构建目前会卡在 tauri/linuxdeploy，
       # 先稳定产出 deb/rpm，避免整条发布流水线被上游问题拖挂。
       - name: Build Tauri App on Linux

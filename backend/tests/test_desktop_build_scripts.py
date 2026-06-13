@@ -216,6 +216,24 @@ def test_desktop_workflow_fails_when_release_artifacts_are_missing():
     assert "-exec cp {} release-artifacts/ \\; 2>/dev/null || true" not in workflow
 
 
+def test_desktop_workflow_cleans_stale_tauri_bundles_before_building():
+    repo_root = Path(__file__).parents[2]
+    workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
+
+    cleanup_step = "Clean stale Tauri bundle artifacts"
+    bundle_dir = "BillNote_frontend/src-tauri/target/release/bundle"
+
+    assert cleanup_step in workflow
+    assert f"rm -rf {bundle_dir}" in workflow
+    cleanup_index = workflow.index(cleanup_step)
+    for build_step in [
+        "Build Tauri App on Linux",
+        "Build Tauri App on Windows",
+        "Build Tauri App on macOS",
+    ]:
+        assert cleanup_index < workflow.index(build_step)
+
+
 def test_desktop_workflow_names_checksum_files_per_platform():
     repo_root = Path(__file__).parents[2]
     workflow = (repo_root / ".github" / "workflows" / "main.yml").read_text(encoding="utf-8")
