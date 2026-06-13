@@ -10,11 +10,15 @@ import {
   FormControl,
   FormMessage,
 } from '@/components/ui/form'
-import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { getDownloaderCookie, updateDownloaderCookie } from '@/services/downloader' // 你自定义的请求
+import {
+  getDownloaderCookie,
+  importDownloaderCookie,
+  updateDownloaderCookie,
+} from '@/services/downloader' // 你自定义的请求
 import { useParams } from 'react-router-dom'
 import { videoPlatforms } from '@/constant/note.ts'
 
@@ -30,6 +34,7 @@ const DownloaderForm = () => {
   const { id } = useParams()
 
   const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
 
   useEffect(() => {
     const loadCookie = async () => {
@@ -61,6 +66,21 @@ const DownloaderForm = () => {
     }
   }
 
+  const onImportCookie = async () => {
+    if (id !== 'bilibili') return
+    try {
+      setImporting(true)
+      const res = await importDownloaderCookie(id)
+      const cookie = res?.cookie || ''
+      form.reset({ cookie })
+      toast.success('获取成功')
+    } catch {
+      toast.error('获取失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   if (loading) return <div className="p-4">加载中...</div>
 
   return (
@@ -71,6 +91,12 @@ const DownloaderForm = () => {
             设置{videoPlatforms.find(item => item.value === id)?.label}下载器 Cookie
           </div>
 
+          {id === 'bilibili' ? (
+            <Button type="button" variant="outline" onClick={onImportCookie} disabled={importing}>
+              {importing ? '获取中...' : '从浏览器获取(实验性功能)'}
+            </Button>
+          ) : null}
+
           <FormField
             control={form.control}
             name="cookie"
@@ -78,7 +104,7 @@ const DownloaderForm = () => {
               <FormItem className="flex flex-col gap-2">
                 <FormLabel>Cookie</FormLabel>
                 <FormControl>
-                  <Input {...field} placeholder="输入 Cookie" />
+                  <Textarea {...field} className="min-h-40 font-mono text-sm" placeholder="输入 Cookie" />
                 </FormControl>
                 <FormMessage />
               </FormItem>

@@ -2,13 +2,20 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, Manager};
-use tauri_plugin_shell::process::CommandEvent;
+use std::sync::Mutex;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime};
+use tauri_plugin_shell::process::{Command, CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+#[derive(Default)]
+struct BackendSidecarState {
+    child: Mutex<Option<CommandChild>>,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .manage(BackendSidecarState::default())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -20,7 +27,6 @@ pub fn run() {
             }
 
             let exe_path = env::current_exe().expect("无法获取当前可执行文件路径");
-            let sidecar_dir = exe_path.parent().expect("无法获取可执行文件的父目录");
 
             // 收集所有系统环境变量
             let mut all_env_vars = HashMap::new();
@@ -50,20 +56,24 @@ pub fn run() {
             check_ffmpeg_availability();
 
             // 启动 Python 后端侧车
-            let mut sidecar_command = app.shell().sidecar("RaindropNoteBackend").unwrap();
+            let mut sidecar_command =
+                backend_command(app.handle()).expect("Failed to prepare backend command");
+
+            if let Some(runtime_dir) = packaged_runtime_dir(&exe_path, app.handle()) {
+                sidecar_command = sidecar_command.current_dir(runtime_dir);
+            }
 
             // 设置所有环境变量到 sidecar
             for (key, value) in &all_env_vars {
                 sidecar_command = sidecar_command.env(key, value);
             }
 
-            let (mut rx, _child) = sidecar_command
-                .current_dir(sidecar_dir)
-                .spawn()
-                .expect("Failed to spawn sidecar");
+            let (mut rx, child) = sidecar_command.spawn().expect("Failed to spawn sidecar");
+            store_tracked_sidecar(app.handle(), child);
 
             // 获取主窗口句柄用于发送事件
             let window = app.get_webview_window("main").unwrap();
+            let app_handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
                 // 读取诸如 stdout 之类的事件
@@ -87,6 +97,7 @@ pub fn run() {
                                 .expect("failed to emit event");
                         }
                         CommandEvent::Terminated(payload) => {
+                            clear_tracked_sidecar(&app_handle);
                             println!("Backend terminated with code: {:?}", payload.code);
                             window
                                 .emit("backend-terminated", Some(payload.code))
@@ -108,8 +119,14 @@ pub fn run() {
             run_command_with_env,
             test_ffmpeg_access
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, RunEvent::Exit) {
+            terminate_tracked_sidecar(app_handle);
+        }
+    });
 }
 
 fn load_env_overrides(exe_path: &Path) -> HashMap<String, String> {
@@ -145,7 +162,29 @@ fn push_env_candidates(files: &mut Vec<PathBuf>, start: &Path) {
     }
 
     push_unique_env_file(files, start.join(".env"));
+    if let Some(contents_dir) = bundled_macos_contents_dir(start) {
+        push_unique_env_file(
+            files,
+            contents_dir
+                .join("Resources")
+                .join("_internal")
+                .join(".env"),
+        );
+    }
     push_unique_env_file(files, start.join("_internal").join(".env"));
+}
+
+fn bundled_macos_contents_dir(start: &Path) -> Option<PathBuf> {
+    if start.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+
+    let contents_dir = start.parent()?;
+    if contents_dir.file_name()?.to_str()? != "Contents" {
+        return None;
+    }
+
+    Some(contents_dir.to_path_buf())
 }
 
 fn find_repo_root(start: &Path) -> Option<PathBuf> {
@@ -197,6 +236,77 @@ fn parse_env_file(path: &Path) -> Result<HashMap<String, String>, std::io::Error
     }
 
     Ok(vars)
+}
+
+fn backend_command<R: Runtime>(
+    app_handle: &AppHandle<R>,
+) -> Result<Command, tauri_plugin_shell::Error> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(nested_backend_path) = nested_macos_backend_executable(app_handle) {
+            return Ok(app_handle.shell().command(nested_backend_path));
+        }
+    }
+
+    app_handle.shell().sidecar("RaindropNoteBackend")
+}
+
+#[cfg(target_os = "macos")]
+fn nested_macos_backend_executable<R: Runtime>(app_handle: &AppHandle<R>) -> Option<PathBuf> {
+    let resource_dir = app_handle.path().resource_dir().ok()?;
+    let nested_backend_path = resource_dir
+        .join("RaindropNoteBackend.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("RaindropNoteBackend");
+
+    nested_backend_path.exists().then_some(nested_backend_path)
+}
+
+fn packaged_runtime_dir<R: Runtime>(exe_path: &Path, app_handle: &AppHandle<R>) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let exe_dir = exe_path.parent()?;
+        bundled_macos_contents_dir(exe_dir)?;
+
+        let runtime_dir = app_handle.path().app_data_dir().ok()?;
+        fs::create_dir_all(&runtime_dir).ok()?;
+        return Some(runtime_dir);
+    }
+
+    #[allow(unreachable_code)]
+    None
+}
+
+fn take_tracked_sidecar(app_handle: &AppHandle) -> Option<CommandChild> {
+    app_handle
+        .state::<BackendSidecarState>()
+        .child
+        .lock()
+        .unwrap()
+        .take()
+}
+
+fn store_tracked_sidecar(app_handle: &AppHandle, child: CommandChild) {
+    if let Some(existing_child) = app_handle
+        .state::<BackendSidecarState>()
+        .child
+        .lock()
+        .unwrap()
+        .replace(child)
+    {
+        let _ = existing_child.kill();
+    }
+}
+
+fn clear_tracked_sidecar(app_handle: &AppHandle) {
+    let _ = take_tracked_sidecar(app_handle);
+}
+
+fn terminate_tracked_sidecar(app_handle: &AppHandle) {
+    if let Some(child) = take_tracked_sidecar(app_handle) {
+        let _ = child.kill();
+    }
 }
 
 // 获取额外的二进制路径
@@ -376,9 +486,9 @@ async fn test_ffmpeg_access() -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::push_env_candidates;
+    use super::{bundled_macos_contents_dir, push_env_candidates};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -414,21 +524,34 @@ mod tests {
     }
 
     #[test]
-    fn push_env_candidates_includes_packaged_internal_env_file() {
+    fn bundled_macos_contents_dir_detects_macos_bundle_layout() {
+        let macos_dir = PathBuf::from("/tmp/RaindropNote.app/Contents/MacOS");
+        let expected = PathBuf::from("/tmp/RaindropNote.app/Contents");
+
+        assert_eq!(bundled_macos_contents_dir(&macos_dir), Some(expected));
+        assert_eq!(
+            bundled_macos_contents_dir(Path::new("/tmp/not-a-bundle")),
+            None
+        );
+    }
+
+    #[test]
+    fn push_env_candidates_includes_packaged_resources_internal_env_file() {
         let root = unique_temp_dir();
         let exe_dir = root.join("RaindropNote.app").join("Contents").join("MacOS");
+        let resources_dir = root
+            .join("RaindropNote.app")
+            .join("Contents")
+            .join("Resources")
+            .join("_internal");
 
-        fs::create_dir_all(exe_dir.join("_internal")).unwrap();
-        fs::write(
-            exe_dir.join("_internal").join(".env"),
-            "BACKEND_PORT=8483\n",
-        )
-        .unwrap();
+        fs::create_dir_all(&resources_dir).unwrap();
+        fs::write(resources_dir.join(".env"), "BACKEND_PORT=8483\n").unwrap();
 
         let mut files = Vec::new();
         push_env_candidates(&mut files, &exe_dir);
 
-        assert_eq!(files, vec![exe_dir.join("_internal").join(".env")]);
+        assert_eq!(files, vec![resources_dir.join(".env")]);
 
         fs::remove_dir_all(root).unwrap();
     }

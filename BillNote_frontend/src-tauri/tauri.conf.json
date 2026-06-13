@@ -33,7 +33,7 @@
     },
     "macOS":{
       "files": {
-               "Frameworks": "bin/RaindropNoteBackend/_internal"
+               "Resources/RaindropNoteBackend.app": "bin/RaindropNoteBackend.app"
       }
     },
     "active": true,

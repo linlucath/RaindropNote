@@ -56,3 +56,20 @@ def test_main_uses_runtime_storage_helpers():
     assert 'static_dir = "static"' not in main_source
     assert 'uploads_dir = "uploads"' not in main_source
     assert 'os.getenv(\'OUT_DIR\', \'./static/screenshots\')' not in main_source
+
+
+def test_frozen_macos_app_dir_uses_application_support(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(path_helper, "Path", Path)
+    monkeypatch.setattr(path_helper, "sys", type("FrozenSys", (), {"frozen": True, "platform": "darwin"})())
+    monkeypatch.setattr(path_helper.Path, "home", lambda: tmp_path)
+    monkeypatch.delenv("RAINDROPNOTE_APP_DIR", raising=False)
+
+    assert Path(path_helper.get_app_dir()) == tmp_path / "Library" / "Application Support" / "RaindropNote"
+
+
+def test_runtime_override_app_dir_wins_in_frozen_mode(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(path_helper, "sys", type("FrozenSys", (), {"frozen": True, "platform": "darwin"})())
+    override_dir = tmp_path / "portable-data"
+    monkeypatch.setenv("RAINDROPNOTE_APP_DIR", str(override_dir))
+
+    assert Path(path_helper.get_app_dir("logs")) == override_dir / "logs"
