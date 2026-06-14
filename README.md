@@ -100,3 +100,11 @@
 ## 许可证
 
 MIT License
+
+## 鸣谢
+
+感谢各个公益站的存在，让我能几乎无成本地 vibe coding 出一个自己会日常用的项目。
+
+感谢 [DeepSeek](https://www.deepseek.com/)，如此低的 token 价格能让每篇文字稿的成本基本在一分钱以内。
+
+感谢 [Linux Do](https://linux.do/)，让我学会了很多很多奇奇怪怪的知识，用上这么好用的 AI。
