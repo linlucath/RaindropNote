@@ -74,7 +74,9 @@ def parse_bilibili_space_video_request(space_url: str) -> tuple[str | None, str]
         return None, "click"
 
     path_parts = [segment for segment in parsed.path.rstrip("/").split("/") if segment]
-    if len(path_parts) == 2 and path_parts[0].isdigit() and path_parts[1] == "video":
+    if len(path_parts) == 1 and path_parts[0].isdigit():
+        pass
+    elif len(path_parts) == 2 and path_parts[0].isdigit() and path_parts[1] == "video":
         pass
     elif len(path_parts) == 3 and path_parts[0].isdigit() and path_parts[1] == "upload" and path_parts[2] == "video":
         pass

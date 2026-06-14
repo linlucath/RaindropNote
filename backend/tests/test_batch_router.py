@@ -335,6 +335,40 @@ class TestBatchRouter(unittest.TestCase):
         )
         extract_playlist.assert_not_called()
 
+    def test_preview_page_uses_uploader_api_for_bilibili_space_homepage_urls(self):
+        uploader_service = Mock()
+        uploader_service.get_uploader_videos_page.return_value = {
+            "items": [
+                {
+                    "video_id": "BV1",
+                    "video_url": "https://www.bilibili.com/video/BV1",
+                    "title": "视频1",
+                }
+            ],
+            "page": 1,
+            "page_size": 2,
+            "has_more": False,
+            "total": None,
+        }
+
+        with patch.object(batch, "_uploader_video_service", uploader_service, create=True), \
+                patch("app.routers.batch._extract_flat_playlist") as extract_playlist:
+            batch.preview_bilibili_space_page(
+                "https://space.bilibili.com/280780745?",
+                page=1,
+                page_size=2,
+                limit=42,
+            )
+
+        uploader_service.get_uploader_videos_page.assert_called_once_with(
+            mid="280780745",
+            page=1,
+            page_size=2,
+            limit=42,
+            order="click",
+        )
+        extract_playlist.assert_not_called()
+
     def test_batch_preview_uses_popular_chip_continuation_for_first_youtube_page(self):
         response = Mock()
         response.text = (
