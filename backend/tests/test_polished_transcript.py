@@ -29,6 +29,13 @@ def test_language_guidance_treats_chinese_language_or_sample_as_chinese():
     assert "先输出英文原段落" not in inferred_chinese
 
 
+def test_language_guidance_treats_bilibili_ai_zh_as_chinese():
+    guidance = polished_transcript_language_guidance("ai-zh", [_segment("Hello")])
+
+    assert "不需要双语对照" in guidance
+    assert "先输出英文原段落" not in guidance
+
+
 def test_language_guidance_requires_bilingual_output_for_non_chinese_source():
     guidance = polished_transcript_language_guidance("en", [_segment("hello world")])
 

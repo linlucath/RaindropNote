@@ -19,8 +19,8 @@ def polished_transcript_section_guidance(segments: list) -> str:
 
 
 def polished_transcript_language_guidance(language: str | None, segments: list) -> str:
-    normalized_language = (language or "").lower()
-    if normalized_language.startswith("zh"):
+    normalized_language = (language or "").lower().replace("_", "-")
+    if normalized_language.startswith("zh") or normalized_language.endswith("-zh"):
         return "如果原字幕本身是中文，就按现有方式输出自然、完整的简体中文文字稿，不需要双语对照。 "
 
     sample_text = " ".join(_segment_text(segment) for segment in segments[:5]).strip()
